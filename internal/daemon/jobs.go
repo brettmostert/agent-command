@@ -308,11 +308,25 @@ func isDir(p string) error {
 func inGitRepo(ctx context.Context, dir string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output() // #nosec G204 -- fixed git arguments
+	c := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree") // #nosec G204 -- fixed git arguments
+	c.Env = withoutGitVars(os.Environ())
+	out, err := c.Output()
 	if err != nil || strings.TrimSpace(string(out)) != "true" {
 		return fmt.Errorf("%s isn't in a git repository, so a worktree can't be made from it", dir)
 	}
 	return nil
+}
+
+// withoutGitVars drops GIT_DIR and the like, which would point git at another
+// repo (as in a git hook) instead of the folder it's asked about.
+func withoutGitVars(env []string) []string {
+	var out []string
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "GIT_") {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 var unsafeName = regexp.MustCompile(`[^a-z0-9]+`)

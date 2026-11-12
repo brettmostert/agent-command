@@ -345,7 +345,9 @@ func TestWorktreeRun(t *testing.T) {
 	d, fh, clk, _ := jobDaemon(t)
 	ctx := context.Background()
 	repo := t.TempDir()
-	if out, err := exec.Command("git", "-C", repo, "init", "-q").CombinedOutput(); err != nil {
+	initRepo := exec.Command("git", "-C", repo, "init", "-q")
+	initRepo.Env = withoutGitVars(os.Environ()) // not this repo, when a git hook runs the tests
+	if out, err := initRepo.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	j := folderJob(repo)
