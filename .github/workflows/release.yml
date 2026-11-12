@@ -95,7 +95,7 @@ jobs:
       - name: check the app
         run: |
           codesign --verify --strict "dist/Agent Command.app"
-          codesign -dv "dist/Agent Command.app" 2>&1 | grep -F "Authority=Agent Command Self-Signed"
+          codesign -dvv "dist/Agent Command.app" 2>&1 | grep -F "Authority=Agent Command Self-Signed"
           "dist/Agent Command.app/Contents/MacOS/agent-command" version | grep -F "$VERSION"
           "dist/Agent Command.app/Contents/MacOS/acmd-speech" --version
 
