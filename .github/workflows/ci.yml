@@ -79,6 +79,10 @@ jobs:
       - name: build the app, signed with a throwaway certificate
         run: |
           scripts/create-signing-cert.sh "$RUNNER_TEMP/cert" >/dev/null
+          # What made it, should importing it fail (the certificate is a throwaway).
+          command -v openssl base64; openssl version
+          wc -c "$RUNNER_TEMP/cert/signing.p12" "$RUNNER_TEMP/cert/signing.p12.base64"
+          openssl pkcs12 -info -noout -in "$RUNNER_TEMP/cert/signing.p12" -passin "file:$RUNNER_TEMP/cert/signing.password" 2>&1 | head -5 || true
           SIGNING_P12="$(cat "$RUNNER_TEMP/cert/signing.p12.base64")" \
           SIGNING_PASSWORD="$(cat "$RUNNER_TEMP/cert/signing.password")" \
             scripts/import-signing-cert.sh "$RUNNER_TEMP/signing.keychain-db" > "$RUNNER_TEMP/signing.env"
