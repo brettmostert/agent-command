@@ -24,10 +24,12 @@ while IFS= read -r k; do
 done < <(security list-keychains -d user)
 security list-keychains -d user -s "$keychain" "${existing[@]}"
 
-p12="$(mktemp)"
-trap 'rm -f "$p12"' EXIT
+# security reads the format from the file's extension, so it must end in .p12.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+p12="$tmp/signing.p12"
 printf '%s' "$SIGNING_P12" | base64 -d >"$p12"
-security import "$p12" -k "$keychain" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null
+security import "$p12" -f pkcs12 -k "$keychain" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$key_password" "$keychain" >/dev/null
 
 # By its SHA-1, not its name: a self-signed certificate isn't trusted, and
