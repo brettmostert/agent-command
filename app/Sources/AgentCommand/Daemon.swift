@@ -407,3 +407,41 @@ final class DaemonConnection {
         }
     }
 }
+
+/// Runs the app's own acmd for a command, off the main thread.
+enum Acmd {
+    /// Runs it with args, then done(succeeded, output) on the main actor. It has
+    /// no terminal, so a command that needs an admin password asks through
+    /// macOS's dialog.
+    nonisolated static func run(_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) {
+        DispatchQueue.global().async {
+            let process = Process()
+            let bin = DaemonPaths.acmd
+            if bin.hasPrefix("/") {
+                process.executableURL = URL(fileURLWithPath: bin)
+                process.arguments = args
+            } else {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                process.arguments = [bin] + args
+            }
+            process.standardInput = FileHandle.nullDevice
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            let ok: Bool
+            let text: String
+            do {
+                try process.run()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                ok = process.terminationStatus == 0
+                text = String(decoding: data, as: UTF8.self)
+            } catch {
+                ok = false
+                text = error.localizedDescription
+            }
+            let output = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            Task { @MainActor in done(ok, output) }
+        }
+    }
+}

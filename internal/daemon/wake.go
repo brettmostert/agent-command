@@ -22,20 +22,24 @@ const (
 	keepAwakeGrace = 2 * time.Minute
 	// keyWakeAll is the app_state key for waking for every job.
 	keyWakeAll = "jobs.wake_all"
+	// wakeRecheck is how often, while waking is off, the daemon looks for the
+	// sudoers rule again.
+	wakeRecheck = 5 * time.Minute
 )
 
 // waking is what the daemon knows about the Mac's wakes. syncMu serializes
 // the slow part (pmset and sudo); mu guards the fields and is only held
 // briefly, so a snapshot never waits on pmset. Lock order: d.mu, then mu.
 type waking struct {
-	syncMu  sync.Mutex
-	mu      sync.Mutex
-	checked bool      // allowed is known
-	allowed bool      // the sudoers rule is in place
-	synced  bool      // the wake at `at` is set
-	at      time.Time // the wake acmd set (zero: none)
-	lastErr string
-	awake   map[string]awakeRun // by session: woken runs holding off sleep
+	syncMu    sync.Mutex
+	mu        sync.Mutex
+	checked   bool      // allowed is known
+	checkedAt time.Time // when it was last checked
+	allowed   bool      // the sudoers rule is in place
+	synced    bool      // the wake at `at` is set
+	at        time.Time // the wake acmd set (zero: none)
+	lastErr   string
+	awake     map[string]awakeRun // by session: woken runs holding off sleep
 }
 
 type awakeRun struct {
@@ -96,12 +100,14 @@ func (d *Daemon) syncWake(ctx context.Context, force bool) {
 	}
 
 	d.wake.mu.Lock()
-	check := force || !d.wake.checked
+	// While it's off, look for the rule now and then: it may have been added
+	// from elsewhere.
+	check := force || !d.wake.checked || (!d.wake.allowed && d.cfg.Now().Sub(d.wake.checkedAt) > wakeRecheck)
 	d.wake.mu.Unlock()
 	if check {
 		allowed := w.Allowed(ctx)
 		d.wake.mu.Lock()
-		d.wake.allowed, d.wake.checked = allowed, true
+		d.wake.allowed, d.wake.checked, d.wake.checkedAt = allowed, true, d.cfg.Now()
 		d.wake.mu.Unlock()
 	}
 

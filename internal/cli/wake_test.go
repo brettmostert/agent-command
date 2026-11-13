@@ -187,3 +187,42 @@ func TestUninstallRemovesTheWakeRule(t *testing.T) {
 		t.Error("rule kept")
 	}
 }
+
+func TestInitOffersToWakeTheMac(t *testing.T) {
+	f := &fakeMac{}
+	useFakeMac(t, f)
+	env(t)
+	old := interactive
+	t.Cleanup(func() { interactive = old })
+	ctx := context.Background()
+
+	// Not a terminal (Homebrew's install, the app): no question.
+	interactive = func(io.Reader) bool { return false }
+	var out strings.Builder
+	if err := offerWake(ctx, strings.NewReader("y\n"), &out); err != nil || out.Len() != 0 || f.hasRule() {
+		t.Errorf("asked without a terminal: %v %q", err, out.String())
+	}
+
+	interactive = func(io.Reader) bool { return true }
+	out.Reset()
+	if err := offerWake(ctx, strings.NewReader("\n"), &out); err != nil || !strings.Contains(out.String(), "Not now") || f.hasRule() {
+		t.Errorf("no by default: %v %q", err, out.String())
+	}
+	out.Reset()
+	if err := offerWake(ctx, strings.NewReader("y\n"), &out); err != nil || !f.hasRule() || !strings.Contains(out.String(), "Every job wakes it.") {
+		t.Errorf("yes: %v %q", err, out.String())
+	}
+	// Already on: not asked again.
+	out.Reset()
+	if err := offerWake(ctx, strings.NewReader("y\n"), &out); err != nil || out.Len() != 0 {
+		t.Errorf("asked again: %q", out.String())
+	}
+
+	// A canceled password dialog is said, and init still succeeds.
+	f2 := &fakeMac{cancel: true}
+	useFakeMac(t, f2)
+	out.Reset()
+	if err := offerWake(ctx, strings.NewReader("yes\n"), &out); err != nil || !strings.Contains(out.String(), "Couldn't turn on waking the Mac: adding the rule: canceled") {
+		t.Errorf("canceled: %v %q", err, out.String())
+	}
+}

@@ -288,3 +288,31 @@ func TestWakeOpAndSnapshot(t *testing.T) {
 		t.Error("bad request")
 	}
 }
+
+func TestWakeLooksForTheRuleNowAndThen(t *testing.T) {
+	d, _, clk, _ := jobDaemon(t)
+	fw := &fakeWaker{}
+	d.cfg.Waker = fw
+	ctx := context.Background()
+	j := folderJob(t.TempDir())
+	j.Wake = true
+	mustSave(t, d, j)
+	d.syncWake(ctx, false)
+	d.syncWake(ctx, false)
+	if took := fw.took(); !slices.Equal(took, []string{"allowed?"}) {
+		t.Errorf("checks once: %v", took)
+	}
+	// Added from elsewhere (acmd init, say): found within wakeRecheck.
+	fw.allowed = true
+	clk.set("2026-11-12 07:06:00")
+	d.syncWake(ctx, false)
+	if took := fw.took(); !slices.Equal(took, []string{"allowed?", "set 11-12 07:58:00"}) {
+		t.Errorf("found it: %v", took)
+	}
+	// Once on, it doesn't keep asking sudo.
+	clk.set("2026-11-12 07:30:00")
+	d.syncWake(ctx, false)
+	if took := fw.took(); len(took) != 0 {
+		t.Errorf("asked again: %v", took)
+	}
+}

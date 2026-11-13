@@ -428,3 +428,30 @@ extension Job {
         return wake ? "Yes, shortly before each run" : "No"
     }
 }
+
+/// The warning to show when scheduled jobs can't wake the Mac, and the acmd
+/// command that fixes it; nil when there's nothing to warn about.
+struct WakeAdvice: Equatable {
+    let title: String
+    let detail: String
+    let args: [String]
+
+    static func check(_ state: WakeState?, jobs: [Job]) -> WakeAdvice? {
+        // nil: this daemon can't wake the Mac at all.
+        guard let state, !state.allowed else { return nil }
+        let active = jobs.filter { !$0.paused && $0.next != nil }
+        guard !active.isEmpty else { return nil }
+        let asking = active.filter(\.wake)
+        if asking.isEmpty {
+            return WakeAdvice(
+                title: "Scheduled jobs can't wake the Mac",
+                detail: "Runs due while the Mac sleeps are missed. Turning it on wakes the Mac shortly before each run.",
+                args: ["schedule", "wake", "on", "--all"])
+        }
+        let names = asking.count == 1 ? "\(asking[0].name) is" : "\(asking.count) jobs are"
+        return WakeAdvice(
+            title: "Jobs can't wake the Mac",
+            detail: "\(names) set to wake the Mac, but waking it is off, so runs due while it sleeps are missed.",
+            args: ["schedule", "wake", "on"])
+    }
+}

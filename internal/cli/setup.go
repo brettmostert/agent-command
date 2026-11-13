@@ -177,6 +177,12 @@ func runInit(ctx context.Context, in io.Reader, out io.Writer, o initOptions) (b
 	for _, a := range plan.After {
 		fmt.Fprintln(out, a)
 	}
+	// Homebrew's install has no terminal to ask in (it passes --hook-binary).
+	if o.hookBinary == "" {
+		if err := offerWake(ctx, in, out); err != nil {
+			return true, err
+		}
+	}
 	return true, nil
 }
 

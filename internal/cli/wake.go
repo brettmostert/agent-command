@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -124,38 +125,11 @@ func newWakeOnCmd() *cobra.Command {
 		Short: "Let acmd wake the Mac (asks for your password once)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := cmd.Context()
-			out := cmd.OutOrStdout()
-			if !localWaker().Allowed(ctx) {
-				u, err := user.Current()
-				if err != nil {
-					return err
-				}
-				script, err := wake.InstallScript(u.Username)
-				if err != nil {
-					return err
-				}
-				prompt := "Agent Command wants to wake the Mac for scheduled jobs. This adds " + wake.RulePath + "."
-				if err := asRoot(ctx, cmd.InOrStdin(), out, script, prompt); err != nil {
-					return fmt.Errorf("adding the rule: %w", err)
-				}
-				if !localWaker().Allowed(ctx) {
-					return errors.New("the rule is in place, but sudo still asks for a password: see `sudo -l`")
-				}
+			var want *bool
+			if cmd.Flags().Changed("all") {
+				want = &all
 			}
-			return withClient(ctx, func(c *client, snap ipc.Snapshot) error {
-				ref := ipc.WakeRef{All: all}
-				if !cmd.Flags().Changed("all") && snap.Wake != nil {
-					ref.All = snap.Wake.All
-				}
-				var st ipc.WakeState
-				if err := c.conn.Call(ipc.OpWakeSet, ref, &st); err != nil {
-					return err
-				}
-				snap.Wake = &st
-				writeWake(out, snap)
-				return nil
-			})
+			return turnWakeOn(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), want)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "wake for every job, not only those with --wake (--all=false: only those)")
@@ -213,4 +187,79 @@ func wakeHint(out io.Writer, snap ipc.Snapshot, wakes bool) {
 	if wakes && (snap.Wake == nil || !snap.Wake.Allowed) {
 		fmt.Fprintln(out, "It can't wake the Mac yet: turn that on with `acmd schedule wake on`.")
 	}
+}
+
+// addWakeRule installs the sudoers rule, as root, unless it's in place.
+func addWakeRule(ctx context.Context, in io.Reader, out io.Writer) error {
+	if localWaker().Allowed(ctx) {
+		return nil
+	}
+	u, err := user.Current()
+	if err != nil {
+		return err
+	}
+	script, err := wake.InstallScript(u.Username)
+	if err != nil {
+		return err
+	}
+	prompt := "Agent Command wants to wake the Mac for scheduled jobs. This adds " + wake.RulePath + "."
+	if err := asRoot(ctx, in, out, script, prompt); err != nil {
+		return fmt.Errorf("adding the rule: %w", err)
+	}
+	if !localWaker().Allowed(ctx) {
+		return errors.New("the rule is in place, but sudo still asks for a password: see `sudo -l`")
+	}
+	return nil
+}
+
+// turnWakeOn adds the rule, tells the daemon (all: wake for every job; nil
+// keeps the setting), and says how it stands.
+func turnWakeOn(ctx context.Context, in io.Reader, out io.Writer, all *bool) error {
+	if err := addWakeRule(ctx, in, out); err != nil {
+		return err
+	}
+	return withClient(ctx, func(c *client, snap ipc.Snapshot) error {
+		var ref ipc.WakeRef
+		switch {
+		case all != nil:
+			ref.All = *all
+		case snap.Wake != nil:
+			ref.All = snap.Wake.All
+		}
+		var st ipc.WakeState
+		if err := c.conn.Call(ipc.OpWakeSet, ref, &st); err != nil {
+			return err
+		}
+		snap.Wake = &st
+		writeWake(out, snap)
+		return nil
+	})
+}
+
+// interactive says whether in is a terminal to ask in; swappable in tests.
+var interactive = func(in io.Reader) bool {
+	f, ok := in.(*os.File)
+	return ok && isTerminal(f)
+}
+
+// offerWake is acmd init's question, in a terminal: let jobs wake the Mac?
+// Anywhere else (Homebrew's install, the app) it says nothing; the app asks
+// for itself.
+func offerWake(ctx context.Context, in io.Reader, out io.Writer) error {
+	if !interactive(in) || ruleInstalled() {
+		return nil
+	}
+	fmt.Fprintf(out, "\nLet scheduled jobs wake the Mac shortly before they run? This adds a sudoers rule\n"+
+		"(%s) that lets you set acmd's own wakes, and nothing else, without a password.\n"+
+		"It asks for your password once. `acmd schedule wake off` removes it. [y/N] ", wake.RulePath)
+	line, _ := bufio.NewReader(in).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		fmt.Fprintln(out, "Not now: turn it on any time with `acmd schedule wake on`.")
+		return nil
+	}
+	every := true
+	if err := turnWakeOn(ctx, in, out, &every); err != nil {
+		fmt.Fprintf(out, "Couldn't turn on waking the Mac: %v\n", err)
+	}
+	return nil
 }

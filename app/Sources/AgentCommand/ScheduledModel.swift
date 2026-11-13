@@ -329,7 +329,7 @@ final class ScheduledModel {
 
     /// Runs the app's acmd with args, then done(succeeded, output). Tests swap
     /// it, so they never ask for a password or touch the Mac's wakes.
-    @ObservationIgnored var runAcmd: (_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) -> Void = ScheduledModel.acmd
+    @ObservationIgnored var runAcmd: (_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) -> Void = Acmd.run
 
     /// Lets acmd wake the Mac: macOS asks for an admin password once.
     func turnWakeOn() {
@@ -359,39 +359,6 @@ final class ScheduledModel {
             } else if !output.contains("canceled") {
                 self.error = output.isEmpty ? "Couldn't change waking the Mac." : output
             }
-        }
-    }
-
-    nonisolated private static func acmd(_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) {
-        DispatchQueue.global().async {
-            let process = Process()
-            let bin = DaemonPaths.acmd
-            if bin.hasPrefix("/") {
-                process.executableURL = URL(fileURLWithPath: bin)
-                process.arguments = args
-            } else {
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments = [bin] + args
-            }
-            // No terminal, so acmd asks through macOS's password dialog.
-            process.standardInput = FileHandle.nullDevice
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            let ok: Bool
-            let text: String
-            do {
-                try process.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                ok = process.terminationStatus == 0
-                text = String(decoding: data, as: UTF8.self)
-            } catch {
-                ok = false
-                text = error.localizedDescription
-            }
-            let output = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            Task { @MainActor in done(ok, output) }
         }
     }
 
