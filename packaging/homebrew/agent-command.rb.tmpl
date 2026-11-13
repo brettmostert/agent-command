@@ -40,10 +40,13 @@ cask "agent-command" do
               must_succeed: false,
             }
 
-  zap trash: [
-    "~/.config/agent-command",
-    "~/.local/state/agent-command",
-  ]
+  # Only zap removes the wake rule: uninstall runs on upgrades too, and
+  # `acmd uninstall` removes it itself.
+  zap delete: "/etc/sudoers.d/agent-command",
+      trash:  [
+        "~/.config/agent-command",
+        "~/.local/state/agent-command",
+      ]
 
   caveats <<~EOS
     Agent Command isn't notarized, so this install cleared macOS's quarantine flag

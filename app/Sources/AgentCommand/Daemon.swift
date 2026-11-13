@@ -7,6 +7,30 @@ struct Snapshot: Decodable {
     let inbox: [InboxItem]?
     let jobs: [Job]?
     let groups: [SessionGroup]?
+    let wake: WakeState?
+}
+
+/// Waking the Mac for jobs (internal/ipc.WakeState): whether acmd may (its
+/// sudoers rule is in place), whether every job wakes it, and the wake it set.
+struct WakeState: Decodable, Equatable {
+    var allowed = false
+    var all = false
+    var next = ""
+    var error = ""
+
+    enum CodingKeys: String, CodingKey { case allowed, all, next, error }
+
+    init(allowed: Bool = false, all: Bool = false, next: String = "", error: String = "") {
+        (self.allowed, self.all, self.next, self.error) = (allowed, all, next, error)
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        allowed = try c.decodeIfPresent(Bool.self, forKey: .allowed) ?? false
+        all = try c.decodeIfPresent(Bool.self, forKey: .all) ?? false
+        next = try c.decodeIfPresent(String.self, forKey: .next) ?? ""
+        error = try c.decodeIfPresent(String.self, forKey: .error) ?? ""
+    }
 }
 
 /// A group of sessions (internal/core.Group), for choosing a job's group.

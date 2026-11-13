@@ -17,6 +17,8 @@ struct Job: Codable, Identifiable, Equatable {
     var sessionID = ""
     var settings: [String: [String]] = [:]
     var runMissed = false
+    /// Wakes the Mac shortly before each run, once acmd may.
+    var wake = false
     // From the daemon.
     var cron = ""
     var once = ""
@@ -29,7 +31,7 @@ struct Job: Codable, Identifiable, Equatable {
     var lastRun: JobRun?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, harness, schedule, prompt, cwd, settings, cron, once, words, summary, paused
+        case id, name, description, harness, schedule, prompt, cwd, settings, cron, once, words, summary, paused, wake
         case groupID = "group_id", promptFile = "prompt_file", place = "where", sessionID = "session_id"
         case runMissed = "run_missed", createdAt = "created_at", nextRun = "next_run", lastRun = "last_run"
     }
@@ -52,6 +54,7 @@ struct Job: Codable, Identifiable, Equatable {
         sessionID = try text(.sessionID)
         settings = try c.decodeIfPresent([String: [String]].self, forKey: .settings) ?? [:]
         runMissed = try c.decodeIfPresent(Bool.self, forKey: .runMissed) ?? false
+        wake = try c.decodeIfPresent(Bool.self, forKey: .wake) ?? false
         cron = try text(.cron)
         once = try text(.once)
         words = try text(.words)
@@ -78,6 +81,7 @@ struct Job: Codable, Identifiable, Equatable {
         try c.encode(sessionID, forKey: .sessionID)
         try c.encode(settings, forKey: .settings)
         try c.encode(runMissed, forKey: .runMissed)
+        try c.encode(wake, forKey: .wake)
     }
 
     var next: Date? { JobTime.parse(nextRun) }
@@ -279,6 +283,7 @@ struct JobDraft: Equatable {
     /// Each setting's text; a list's values are one a line.
     var settings: [String: String] = [:]
     var runMissed = false
+    var wake = false
 
     init(folder: String = "") {
         cwd = folder
@@ -307,6 +312,7 @@ struct JobDraft: Equatable {
         sessionID = job.sessionID
         settings = job.settings.mapValues { $0.joined(separator: "\n") }
         runMissed = job.runMissed
+        wake = job.wake
     }
 
     var isNew: Bool { id.isEmpty }
@@ -347,6 +353,7 @@ struct JobDraft: Equatable {
             return values.isEmpty ? nil : values
         }
         j.runMissed = runMissed
+        j.wake = wake
         return j
     }
 
@@ -400,5 +407,24 @@ enum JobTime {
 
     static func tilde(_ path: String) -> String {
         path.isEmpty ? "no folder" : (path as NSString).abbreviatingWithTildeInPath
+    }
+}
+
+// MARK: Waking the Mac
+
+extension WakeState {
+    /// When the Mac next wakes, or why it doesn't.
+    var nextLine: String {
+        if let next = JobTime.parse(self.next) { return "Next wake: \(JobTime.describe(next))." }
+        return all ? "No run to wake for yet." : "Wakes only for jobs set to wake the Mac."
+    }
+}
+
+extension Job {
+    /// Whether this job wakes the Mac, given the setting.
+    func wakeLine(_ state: WakeState?) -> String {
+        guard let state, state.allowed else { return wake ? "Once waking the Mac is turned on" : "No" }
+        if state.all { return "Yes, as every job does" }
+        return wake ? "Yes, shortly before each run" : "No"
     }
 }

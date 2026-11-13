@@ -320,6 +320,81 @@ final class ScheduledModel {
         }
     }
 
+    // MARK: Waking the Mac
+
+    /// Waking the Mac for jobs; nil when the daemon can't.
+    var wake: WakeState? { store.wake }
+    /// A wake command is running (it may be waiting on the password dialog).
+    private(set) var wakeBusy = false
+
+    /// Runs the app's acmd with args, then done(succeeded, output). Tests swap
+    /// it, so they never ask for a password or touch the Mac's wakes.
+    @ObservationIgnored var runAcmd: (_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) -> Void = ScheduledModel.acmd
+
+    /// Lets acmd wake the Mac: macOS asks for an admin password once.
+    func turnWakeOn() {
+        wakeCommand(["schedule", "wake", "on"], done: "Waking the Mac is on.")
+    }
+
+    /// Clears acmd's wakes and removes its rule (asks for the password again).
+    func turnWakeOff() {
+        wakeCommand(["schedule", "wake", "off"], done: "Waking the Mac is off.")
+    }
+
+    /// Wakes for every job, or only those set to.
+    func setWakeAll(_ all: Bool) {
+        wakeCommand(["schedule", "wake", "on", "--all=\(all)"],
+                    done: all ? "Every job wakes the Mac." : "Only jobs set to wake the Mac do.")
+    }
+
+    private func wakeCommand(_ args: [String], done message: String) {
+        guard !wakeBusy else { return }
+        wakeBusy = true
+        error = nil
+        runAcmd(args) { [weak self] ok, output in
+            guard let self else { return }
+            self.wakeBusy = false
+            if ok {
+                self.show(message)
+            } else if !output.contains("canceled") {
+                self.error = output.isEmpty ? "Couldn't change waking the Mac." : output
+            }
+        }
+    }
+
+    nonisolated private static func acmd(_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) {
+        DispatchQueue.global().async {
+            let process = Process()
+            let bin = DaemonPaths.acmd
+            if bin.hasPrefix("/") {
+                process.executableURL = URL(fileURLWithPath: bin)
+                process.arguments = args
+            } else {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                process.arguments = [bin] + args
+            }
+            // No terminal, so acmd asks through macOS's password dialog.
+            process.standardInput = FileHandle.nullDevice
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            let ok: Bool
+            let text: String
+            do {
+                try process.run()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                ok = process.terminationStatus == 0
+                text = String(decoding: data, as: UTF8.self)
+            } catch {
+                ok = false
+                text = error.localizedDescription
+            }
+            let output = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            Task { @MainActor in done(ok, output) }
+        }
+    }
+
     // MARK: Keys
 
     /// The view's keys. While the form is open only Esc and ⌘↩ are its own; the

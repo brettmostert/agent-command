@@ -142,3 +142,32 @@ private func decodeJob(_ fields: [String: Any]) throws -> Job {
     #expect(groups[1].isArchived)
     #expect(!SessionGroup(id: "x", name: "x").isArchived)
 }
+
+@Test func aJobWakesTheMacWhenItSaysSo() throws {
+    var job = try decodeJob(["id": "J", "wake": true])
+    #expect(job.wake && JobDraft(job).wake)
+    var draft = JobDraft(job)
+    draft.wake = false
+    #expect(!draft.job.wake)
+    let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any]
+    #expect(sent?["wake"] as? Bool == true)
+    #expect(try !decodeJob(["id": "J"]).wake)
+
+    // What the detail says, by the setting.
+    #expect(job.wakeLine(nil) == "Once waking the Mac is turned on")
+    #expect(job.wakeLine(WakeState()) == "Once waking the Mac is turned on")
+    #expect(job.wakeLine(WakeState(allowed: true)) == "Yes, shortly before each run")
+    #expect(job.wakeLine(WakeState(allowed: true, all: true)) == "Yes, as every job does")
+    job.wake = false
+    #expect(job.wakeLine(nil) == "No" && job.wakeLine(WakeState(allowed: true)) == "No")
+}
+
+@Test func theWakeStateReadsWhatTheDaemonSends() throws {
+    let data = Data(#"{"allowed":true,"all":true,"next":"2026-11-14T07:58:00Z","error":"no"}"#.utf8)
+    let state = try JSONDecoder().decode(WakeState.self, from: data)
+    #expect(state == WakeState(allowed: true, all: true, next: "2026-11-14T07:58:00Z", error: "no"))
+    #expect(state.nextLine.hasPrefix("Next wake: "))
+    #expect(try JSONDecoder().decode(WakeState.self, from: Data("{}".utf8)) == WakeState())
+    #expect(WakeState(allowed: true, all: true).nextLine == "No run to wake for yet.")
+    #expect(WakeState(allowed: true).nextLine == "Wakes only for jobs set to wake the Mac.")
+}
