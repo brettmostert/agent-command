@@ -557,6 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         notifier.popupShows = { [weak self] kind in self?.popupWindow.replacesBanner(noticeKind: kind) ?? false }
         registerHotKeys()
         Keymap.shared.onChange = { [weak self] in self?.keysChanged() }
+        Keymap.shared.writeExport()
     }
 
     /// Closing the window keeps the app running, for the popup and the Dock badge. The
@@ -935,6 +936,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func keysChanged() {
         for (action, item) in menuItems { applyKey(action, to: item) }
         registerHotKeys()
+        Keymap.shared.writeExport()
     }
 
     /// The shortcuts that work from any app, off while the shortcuts list records a key.
