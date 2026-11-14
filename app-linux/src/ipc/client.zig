@@ -247,9 +247,14 @@ pub const Client = struct {
         return initFromStream(allocator, io, stream, hello);
     }
 
+    fn reapChild(child_val: std.process.Child, io: std.Io) void {
+        var child = child_val;
+        _ = child.wait(io) catch {};
+    }
+
     /// Connects to `socket_path` without performing the `hello` exchange yet,
-    /// spawning `acmd_bin daemon` and retrying with backoff if `start_daemon` is
-    /// true and the daemon is not yet listening. Stops early if `running` flips false.
+    /// spawning `acmd_bin daemon` and retrying with backoff if `acmd_bin` is
+    /// provided and the daemon is not yet listening. Stops early if `running` flips false.
     fn connectStream(
         io: std.Io,
         socket_path: []const u8,
@@ -263,12 +268,16 @@ pub const Client = struct {
                 if (running) |r| {
                     if (!r.load(.acquire)) return error.Cancelled;
                 }
-                _ = try std.process.spawn(io, .{
+                const child = try std.process.spawn(io, .{
                     .argv = &.{ bin, "daemon" },
                     .stdin = .ignore,
                     .stdout = .ignore,
                     .stderr = .ignore,
+                    .pgid = 0, // Detach from UI's foreground process group so terminal SIGINT doesn't kill the daemon.
                 });
+                if (std.Thread.spawn(.{}, reapChild, .{ child, io })) |reaper| {
+                    reaper.detach();
+                } else |_| {}
 
                 const backoffs_ms = [_]u64{ 50, 100, 200, 400, 800, 1000 };
                 for (backoffs_ms) |ms| {

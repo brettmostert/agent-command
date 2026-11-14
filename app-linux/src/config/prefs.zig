@@ -157,11 +157,10 @@ pub fn save(allocator: std.mem.Allocator, io: std.Io, path: []const u8, prefs: *
     const encoded = try encodeJson(allocator, prefs);
     defer allocator.free(encoded);
 
-    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
-    defer allocator.free(tmp_path);
-
-    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_path, .data = encoded });
-    try std.Io.Dir.cwd().rename(tmp_path, std.Io.Dir.cwd(), path, io);
+    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true });
+    defer atomic.deinit(io);
+    try atomic.file.writeStreamingAll(io, encoded);
+    try atomic.replace(io);
 }
 
 pub fn encodeJson(allocator: std.mem.Allocator, prefs: *const UiPrefs) ![]u8 {
