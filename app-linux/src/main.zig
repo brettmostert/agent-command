@@ -25,9 +25,14 @@ fn onCloseRequest(window: *gtk.Window, userdata: ?*anyopaque) callconv(.c) c_int
     const raw = userdata orelse return 0;
     const state: *AppState = @ptrCast(@alignCast(raw));
 
-    const widget = window.as(gtk.Widget);
-    const w = widget.getWidth();
-    const h = widget.getHeight();
+    var w: c_int = 0;
+    var h: c_int = 0;
+    window.getDefaultSize(&w, &h);
+    if ((w < 400 or h < 300) and window.isMaximized() == 0 and window.isFullscreen() == 0) {
+        const widget = window.as(gtk.Widget);
+        w = widget.getWidth();
+        h = widget.getHeight();
+    }
     if (w >= 400 and h >= 300) {
         state.ui_prefs.window_width = w;
         state.ui_prefs.window_height = h;

@@ -252,6 +252,88 @@ pub const Client = struct {
         _ = child.wait(io) catch {};
     }
 
+    fn connectUnixCancellable(
+        socket_path: []const u8,
+        running: ?*const std.atomic.Value(bool),
+    ) !std.Io.net.Stream {
+        var sa: std.c.sockaddr.un = .{ .family = std.c.AF.UNIX, .path = undefined };
+        if (socket_path.len >= sa.path.len) return error.NameTooLong;
+        @memset(&sa.path, 0);
+        @memcpy(sa.path[0..socket_path.len], socket_path);
+        const addr_len: std.c.socklen_t = @intCast(@offsetOf(std.c.sockaddr.un, "path") + socket_path.len + 1);
+
+        const fd = std.c.socket(std.c.AF.UNIX, std.c.SOCK.STREAM | std.c.SOCK.CLOEXEC | std.c.SOCK.NONBLOCK, 0);
+        if (fd < 0) return error.SocketFailed;
+        errdefer _ = std.c.close(fd);
+
+        if (std.c.connect(fd, @ptrCast(&sa), addr_len) < 0) {
+            const err_code: std.c.E = @enumFromInt(std.c._errno().*);
+            switch (err_code) {
+                .CONNREFUSED => return error.ConnectionRefused,
+                .NOENT => return error.FileNotFound,
+                .INPROGRESS, .AGAIN => {
+                    var pfd = [1]std.posix.pollfd{.{
+                        .fd = fd,
+                        .events = std.posix.POLL.OUT,
+                        .revents = 0,
+                    }};
+                    var waited_ms: u32 = 0;
+                    const max_wait_ms: u32 = 2000;
+                    while (waited_ms < max_wait_ms) {
+                        if (running) |r| {
+                            if (!r.load(.acquire)) return error.Cancelled;
+                        }
+                        const n = try std.posix.poll(&pfd, 100);
+                        if (n > 0) {
+                            var so_err: c_int = 0;
+                            var opt_len: std.c.socklen_t = @sizeOf(c_int);
+                            if (std.c.getsockopt(fd, std.c.SOL.SOCKET, std.c.SO.ERROR, @ptrCast(&so_err), &opt_len) < 0) {
+                                return error.ConnectFailed;
+                            }
+                            if (so_err != 0) {
+                                return switch (@as(std.c.E, @enumFromInt(so_err))) {
+                                    .CONNREFUSED => error.ConnectionRefused,
+                                    .NOENT => error.FileNotFound,
+                                    else => error.ConnectFailed,
+                                };
+                            }
+                            break;
+                        }
+                        waited_ms += 100;
+                    } else {
+                        return error.TimedOut;
+                    }
+                },
+                else => return error.ConnectFailed,
+            }
+        }
+
+        // Restore blocking mode so std.Io.net.Stream reader/writer work normally;
+        // shutdown(fd, SHUT_RDWR) from stop() still unblocks them immediately.
+        const flags = std.c.fcntl(fd, std.c.F.GETFL, @as(c_int, 0));
+        if (flags >= 0) {
+            const nonblock_bit: c_int = @bitCast(std.c.O{ .NONBLOCK = true });
+            _ = std.c.fcntl(fd, std.c.F.SETFL, flags & ~nonblock_bit);
+        }
+
+        return .{ .socket = .{
+            .handle = fd,
+            .address = .{ .ip4 = .loopback(0) },
+        } };
+    }
+
+    fn sleepCancellable(io: std.Io, total_ms: u64, running: ?*const std.atomic.Value(bool)) !void {
+        var remaining = total_ms;
+        while (remaining > 0) {
+            if (running) |r| {
+                if (!r.load(.acquire)) return error.Cancelled;
+            }
+            const step: u64 = @min(remaining, 100);
+            try io.sleep(.fromMilliseconds(@intCast(step)), .awake);
+            remaining -= step;
+        }
+    }
+
     /// Connects to `socket_path` without performing the `hello` exchange yet,
     /// spawning `acmd_bin daemon` and retrying with backoff if `acmd_bin` is
     /// provided and the daemon is not yet listening. Stops early if `running` flips false.
@@ -261,8 +343,7 @@ pub const Client = struct {
         acmd_bin: ?[]const u8,
         running: ?*const std.atomic.Value(bool),
     ) !std.Io.net.Stream {
-        const addr = try std.Io.net.UnixAddress.init(socket_path);
-        return addr.connect(io) catch |err| switch (err) {
+        return connectUnixCancellable(socket_path, running) catch |err| switch (err) {
             error.ConnectionRefused, error.FileNotFound => {
                 const bin = acmd_bin orelse return err;
                 if (running) |r| {
@@ -281,21 +362,18 @@ pub const Client = struct {
 
                 const backoffs_ms = [_]u64{ 50, 100, 200, 400, 800, 1000 };
                 for (backoffs_ms) |ms| {
+                    try sleepCancellable(io, ms, running);
                     if (running) |r| {
                         if (!r.load(.acquire)) return error.Cancelled;
                     }
-                    try io.sleep(.fromMilliseconds(@intCast(ms)), .awake);
-                    if (running) |r| {
-                        if (!r.load(.acquire)) return error.Cancelled;
-                    }
-                    if (addr.connect(io)) |stream| {
+                    if (connectUnixCancellable(socket_path, running)) |stream| {
                         return stream;
                     } else |retry_err| switch (retry_err) {
                         error.ConnectionRefused, error.FileNotFound => continue,
                         else => return retry_err,
                     }
                 }
-                return addr.connect(io);
+                return connectUnixCancellable(socket_path, running);
             },
             else => return err,
         };
