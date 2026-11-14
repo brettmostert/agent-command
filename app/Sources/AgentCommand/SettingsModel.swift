@@ -285,3 +285,26 @@ enum ShellWords {
         return families.union([AppFont.defaultFamily]).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 }
+
+/// Whether the app's icon shows in the menu bar, with its places and Settings. On
+/// by default.
+@Observable final class MenuBarPreference {
+    static let shared = MenuBarPreference(defaults: .standard)
+    static let key = "menuBar.shown"
+
+    var shown: Bool {
+        didSet {
+            defaults.set(shown, forKey: Self.key)
+            if shown != oldValue { onChange() }
+        }
+    }
+
+    /// Told when it's turned on or off: the app adds or removes the icon.
+    @ObservationIgnored var onChange: () -> Void = {}
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        shown = defaults.object(forKey: Self.key) as? Bool ?? true
+    }
+}

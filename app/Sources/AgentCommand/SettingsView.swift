@@ -122,6 +122,7 @@ private struct AcmdToggle: View {
 private struct GeneralSettings: View {
     let model: SettingsModel
     let notifier: AppNotifier
+    @Bindable private var menuBar = MenuBarPreference.shared
     @State private var atLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
@@ -132,6 +133,10 @@ private struct GeneralSettings: View {
                 Text("So the reply popup, notifications and the Dock badge are there from the start.")
             }
             if let loginError { Text(loginError).foregroundStyle(.red) }
+            Toggle(isOn: $menuBar.shown) {
+                Text("Show in the menu bar")
+                Text("Its icon opens the Inbox, Scheduled Jobs, Settings and more, even with the window closed.")
+            }
         }
         Section {
             AcmdToggle(

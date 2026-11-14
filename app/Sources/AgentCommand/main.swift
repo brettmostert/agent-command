@@ -11,7 +11,7 @@ func trace(_ what: String) {
 
 /// A window with the session sidebar beside the pane. Closing it only detaches:
 /// sessions keep running in their hosts.
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private var window: NSWindow?
     private let store = SessionStore()
     private var pane: PaneView?
@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var shortcuts: ShortcutsModel?
     private var settingsWindow: NSWindow?
     private var settingsModel: SettingsModel?
+    private var statusItem: NSStatusItem?
     private var settingsClosed: NSObjectProtocol?
     /// A clicked notification's session, if it arrived before the session list.
     private var pendingOpen: String?
@@ -140,6 +141,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         store.start()
 
         NSApp.mainMenu = makeMenu()
+        MenuBarPreference.shared.onChange = { [weak self] in self?.updateMenuBarItem() }
+        updateMenuBarItem()
         window.makeKeyAndOrderFront(nil)
         self.window = window
         NSApp.activate(ignoringOtherApps: true)
@@ -557,6 +560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         registerHotKeys()
         Keymap.shared.onChange = { [weak self] in self?.keysChanged() }
         GhosttyRuntime.shared.onOpenFile = { [weak self] file, session in self?.openFile(file, from: session) }
+        Keymap.shared.writeExport()
     }
 
     /// Closing the window keeps the app running, for the popup and the Dock badge. The
@@ -697,6 +701,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if alert.runModal() == .alertFirstButtonReturn, choose {
             openSettings(at: .editor)
         }
+    }
+
+    // MARK: The menu bar icon
+
+    /// The app's icon in the menu bar: its places and Settings, from any app, even with
+    /// the window closed. Settings → General turns it off.
+    private func updateMenuBarItem() {
+        if MenuBarPreference.shared.shown {
+            guard statusItem == nil else { return }
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            let image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Agent Command")
+            image?.isTemplate = true
+            item.button?.image = image
+            item.button?.toolTip = "Agent Command"
+            let menu = NSMenu()
+            menu.delegate = self
+            item.menu = menu
+            statusItem = item
+        } else if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+        }
+    }
+
+    /// Built as it opens, so the popup's state and what's waiting are current.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        menu.removeAllItems()
+        @discardableResult
+        func add(_ title: String, _ action: Selector, to target: AnyObject? = nil) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = target ?? self
+            menu.addItem(item)
+            return item
+        }
+        let waiting = store.queue.count
+        add("Open Agent Command", #selector(menuBarOpen))
+        add(waiting > 0 ? "Inbox (\(waiting) waiting)" : "Inbox", #selector(menuBarInbox))
+        add("Scheduled Jobs", #selector(menuBarScheduled))
+        add("New Claude Session", #selector(menuBarNewSession))
+        menu.addItem(.separator())
+        add("Reply Popup", #selector(togglePopupEnabled)).state = PopupSettings.shared.enabled ? .on : .off
+        menu.addItem(.separator())
+        add("Settings…", #selector(showSettings))
+        add("Keyboard Shortcuts", #selector(menuBarShortcuts))
+        menu.addItem(.separator())
+        add("Quit Agent Command", #selector(NSApplication.terminate(_:)), to: NSApp)
+    }
+
+    @objc private func menuBarOpen() { showMainWindow() }
+
+    @objc private func menuBarInbox() {
+        showMainWindow()
+        if inbox == nil { showInbox(.queue) }
+    }
+
+    @objc private func menuBarScheduled() {
+        showMainWindow()
+        if scheduled == nil { showScheduled() }
+    }
+
+    @objc private func menuBarNewSession() {
+        showMainWindow()
+        newClaudeSession()
+    }
+
+    @objc private func menuBarShortcuts() {
+        if shortcuts == nil { showShortcuts() } else { showMainWindow() }
     }
 
     /// Every setting, in a window of its own that can stay open beside the sessions.
@@ -916,6 +988,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func keysChanged() {
         for (action, item) in menuItems { applyKey(action, to: item) }
         registerHotKeys()
+        Keymap.shared.writeExport()
     }
 
     /// The shortcuts that work from any app, off while the shortcuts list records a key.

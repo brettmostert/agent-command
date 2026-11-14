@@ -652,3 +652,58 @@ extension Keymap {
         ])
     }
 }
+
+/// The shortcuts as `acmd keys` prints them: the app writes them to acmd's state
+/// folder as it starts and after each change, as the command line can't read the
+/// app's settings.
+extension Keymap {
+    struct Export: Encodable, Equatable {
+        struct Key: Encodable, Equatable {
+            let action: String
+            let title: String
+            let note: String
+            let keys: [String]
+            let changed: Bool
+        }
+
+        struct Section: Encodable, Equatable {
+            let title: String
+            let keys: [Key]
+        }
+
+        struct Fixed: Encodable, Equatable {
+            let section: String
+            let keys: String
+            let title: String
+        }
+
+        let sections: [Section]
+        let fixed: [Fixed]
+    }
+
+    var export: Export {
+        let sections = KeySection.allCases.map { section in
+            Export.Section(title: section.title, keys: KeyAction.allCases.filter { $0.section == section }.map { action in
+                Export.Key(
+                    action: action.rawValue, title: action.title, note: action.note,
+                    keys: combos(action).map(\.display), changed: isChanged(action))
+            })
+        }
+        return Export(sections: sections, fixed: FixedKeys.all.map { Export.Fixed(section: $0.section, keys: $0.keys, title: $0.title) })
+    }
+
+    /// Where acmd keys reads them.
+    static var exportPath: String {
+        (DaemonPaths.stateDir(ProcessInfo.processInfo.environment) as NSString).appendingPathComponent("keys.json")
+    }
+
+    /// Writes them for acmd keys. A failure only means acmd keys is out of date.
+    func writeExport(to path: String = Keymap.exportPath) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(export) else { return }
+        try? FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+}

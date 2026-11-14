@@ -150,3 +150,24 @@ import Testing
     #expect(KeyCombo(key: 105, mods: .command).display == "⌘key 105" && KeyCombo(key: 105).text == "key105")
     #expect(KeyCombo("space")!.types && !KeyCombo("cmd+space")!.types && !KeyCombo("tab")!.types)
 }
+
+@Test func theShortcutsAreWrittenForAcmdKeys() throws {
+    let keys = Keymap()
+    keys.set(.inbox, [KeyCombo("shift+cmd+k")!])
+    let export = keys.export
+    #expect(export.sections.map(\.title) == KeySection.allCases.map(\.title))
+    let inbox = try #require(export.sections.flatMap(\.keys).first { $0.action == "app.inbox" })
+    #expect(inbox.keys == ["⇧⌘K"] && inbox.changed && inbox.title == "Inbox")
+    let up = try #require(export.sections.flatMap(\.keys).first { $0.action == "list.up" })
+    #expect(up.keys == ["↑", "⌃K", "k"] && !up.changed)
+    #expect(export.fixed.count == FixedKeys.all.count)
+
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("acmd-keys-\(getpid())")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let path = dir.appendingPathComponent("state/keys.json").path
+    keys.writeExport(to: path)
+    let data = try Data(contentsOf: URL(fileURLWithPath: path))
+    let text = String(decoding: data, as: UTF8.self)
+    #expect(text.contains("\"action\" : \"app.inbox\"") && text.contains("⇧⌘K"))
+    #expect(Keymap.exportPath.hasSuffix("/keys.json"))
+}
