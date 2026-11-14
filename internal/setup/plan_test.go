@@ -401,3 +401,29 @@ func TestInitRetiresV1Settings(t *testing.T) {
 	}
 	t.Error("config.toml isn't changed")
 }
+
+// The background service tidies config.toml as it starts: once, and only when
+// there's something to take out.
+func TestRetireOldOnStart(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.toml")
+	if changed, err := RetireOld(file); changed || err != nil {
+		t.Fatalf("no file: %v %v", changed, err)
+	}
+	must(t, os.WriteFile(file, []byte("a = 1\n\n[popup]\nenabled = true\n"), 0o600))
+	if changed, err := RetireOld(file); !changed || err != nil {
+		t.Fatalf("v1 file: %v %v", changed, err)
+	}
+	if b, _ := os.ReadFile(file); string(b) != "a = 1\n" {
+		t.Errorf("after: %q", b)
+	}
+	if changed, err := RetireOld(file); changed || err != nil {
+		t.Errorf("again: %v %v", changed, err)
+	}
+	must(t, os.WriteFile(file, []byte("[x\n[keys]\n"), 0o600))
+	if _, err := RetireOld(file); err == nil {
+		t.Error("a broken file was rewritten")
+	}
+	if _, err := RetireOld(t.TempDir()); err == nil {
+		t.Error("a folder read as a file")
+	}
+}
