@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.53.0](https://github.com/brettmostert/agent-command/compare/v0.52.0...v0.53.0) (2026-11-14)
+
+
+### Features
+
+* **linux:** scaffold Zig GTK4/libadwaita UI and Ghostty shared build ([#31](https://github.com/brettmostert/agent-command/issues/31)) ([48fa800](https://github.com/brettmostert/agent-command/commit/48fa80059a488d6be1e4242109d3ac5dde95a5b0))
+
+
+### Bug Fixes
+
+* **config:** take out acmd v1's settings when the background service starts ([#33](https://github.com/brettmostert/agent-command/issues/33)) ([bb42542](https://github.com/brettmostert/agent-command/commit/bb425423ef5f5569d63b5f3b1ac0fb1dc032cc79))
+
 ## [0.52.0](https://github.com/brettmostert/agent-command/compare/v0.51.0...v0.52.0) (2026-11-14)
 
 
