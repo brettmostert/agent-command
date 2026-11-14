@@ -79,10 +79,36 @@ func NewMac() *Mac {
 // probe is a wake time used only to ask sudo whether the rule allows it.
 var probe = time.Date(2030, 1, 1, 0, 0, 0, 0, time.Local)
 
-// Allowed asks sudo, without a password, whether a wake may be set.
+// Allowed asks sudo, without a password, whether a wake may be set. Being allowed
+// to run pmset isn't enough: an admin may run anything, but with a password. So it
+// also looks for a NOPASSWD entry that covers pmset in sudo's list.
 func (m *Mac) Allowed(ctx context.Context) bool {
-	_, err := m.Run(ctx, sudo, append([]string{"-n", "-l", pmset}, setArgs(probe)...)...)
-	return err == nil
+	if _, err := m.Run(ctx, sudo, append([]string{"-n", "-l", pmset}, setArgs(probe)...)...); err != nil {
+		return false
+	}
+	out, err := m.Run(ctx, sudo, "-n", "-l")
+	return err == nil && passwordless(string(out))
+}
+
+// passwordless says whether sudo -l's list has a NOPASSWD entry for pmset, or for
+// everything.
+func passwordless(list string) bool {
+	for _, line := range strings.Split(list, "\n") {
+		_, commands, ok := strings.Cut(line, "NOPASSWD:")
+		if !ok {
+			continue
+		}
+		for _, c := range strings.Split(commands, ",") {
+			c = strings.TrimSpace(c)
+			if strings.Contains(c, "PASSWD:") { // a later tag ends NOPASSWD's commands
+				break
+			}
+			if c == "ALL" || c == pmset || strings.HasPrefix(c, pmset+" ") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Scheduled reads acmd's wakes from pmset -g sched, which needs no root.

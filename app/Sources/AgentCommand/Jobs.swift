@@ -435,12 +435,21 @@ struct WakeAdvice: Equatable {
     let title: String
     let detail: String
     let args: [String]
+    var actionTitle = "Turn On…"
 
     static func check(_ state: WakeState?, jobs: [Job]) -> WakeAdvice? {
         // nil: this daemon can't wake the Mac at all.
-        guard let state, !state.allowed else { return nil }
+        guard let state else { return nil }
         let active = jobs.filter { !$0.paused && $0.next != nil }
         guard !active.isEmpty else { return nil }
+        if state.allowed {
+            // On, but setting the wake failed: say so, rather than only in the log.
+            guard !state.error.isEmpty, state.all || active.contains(where: \.wake) else { return nil }
+            return WakeAdvice(
+                title: "The Mac couldn't be set to wake",
+                detail: "Runs due while it sleeps may be missed. acmd said: \(state.error)",
+                args: ["schedule", "wake", "on"], actionTitle: "Set Up Again…")
+        }
         let asking = active.filter(\.wake)
         if asking.isEmpty {
             return WakeAdvice(

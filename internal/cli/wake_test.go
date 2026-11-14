@@ -32,7 +32,14 @@ func (f *fakeMac) run(_ context.Context, name string, args ...string) ([]byte, e
 	call := name + " " + strings.Join(args, " ")
 	f.calls = append(f.calls, call)
 	switch {
-	case strings.HasPrefix(call, "/usr/bin/sudo -n -l "), strings.HasPrefix(call, "/usr/bin/sudo -n /usr/bin/pmset"):
+	case call == "/usr/bin/sudo -n -l":
+		if f.rule {
+			return []byte("    (root) NOPASSWD: /usr/bin/pmset ^schedule wake\n"), nil
+		}
+		return []byte("    (ALL) ALL\n"), nil
+	case strings.HasPrefix(call, "/usr/bin/sudo -n -l "):
+		return nil, nil // an admin may run pmset, with a password
+	case strings.HasPrefix(call, "/usr/bin/sudo -n /usr/bin/pmset"):
 		if !f.rule {
 			return []byte("sudo: a password is required"), errors.New("exit status 1")
 		}
