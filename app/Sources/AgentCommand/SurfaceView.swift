@@ -17,6 +17,8 @@ final class SurfaceView: NSView, NSTextInputClient {
     var onClose: (() -> Void)?
     /// Called when the surface takes the keyboard.
     var onFocused: (() -> Void)?
+    /// The session whose terminal this is: a clicked relative path is in its folder.
+    var sessionID: String?
 
     /// The pointer is over a link that ⌘-click opens: show a pointing hand.
     var overLink = false {

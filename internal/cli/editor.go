@@ -84,7 +84,7 @@ func newEditorDetectCmd() *cobra.Command {
 func newEditorSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set vscode|cursor|zed|idea | set custom -- <command…{dir}…>",
-		Short: "Choose the editor (custom commands get the folder as {dir}, added at the end if omitted)",
+		Short: "Choose the editor (custom commands get the folder as {dir}, added at the end if omitted, and a file as {file}, {line} and {col})",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := paths.Default()

@@ -170,6 +170,7 @@ final class PaneView: NSView {
             self.sync()
         }
         surface.onFocused = { [weak self] in self?.surfaceFocused(id) }
+        surface.sessionID = id
         surfaces[id] = surface
         return surface
     }

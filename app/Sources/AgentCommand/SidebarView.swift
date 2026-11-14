@@ -9,6 +9,7 @@ struct SidebarView: View {
     let archive: (Session) -> Void
     let rename: (Session) -> Void
     let openInbox: (Session) -> Void
+    let openInEditor: (Session) -> Void
     let moveOut: (Session) -> Void
     let openSet: (Session) -> Void
     /// A click gives the sidebar the keyboard, with its cursor on that row.
@@ -85,6 +86,7 @@ struct SidebarView: View {
                                     Button("Move Out of Set") { moveOut(session) }
                                 }
                                 Button("Inbox") { openInbox(session) }
+                                Button("Open in Editor") { openInEditor(session) }
                                 Button("Rename…") { rename(session) }
                                 Button("Archive…") { archive(session) }
                             }

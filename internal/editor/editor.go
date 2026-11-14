@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -61,9 +62,13 @@ func (o *Opener) Argv(dir string) ([]string, error) {
 		if len(e.Command) == 0 {
 			return nil, errors.New("the custom editor has no command (acmd editor set custom -- <command> {dir})")
 		}
-		argv := make([]string, len(e.Command))
+		// A command set up for files too: its file arguments mean nothing for a folder.
+		var argv []string
 		for i, a := range e.Command {
-			argv[i] = strings.ReplaceAll(a, "{dir}", dir)
+			if i > 0 && (strings.Contains(a, "{file}") || strings.Contains(a, "{line}") || strings.Contains(a, "{col}")) {
+				continue
+			}
+			argv = append(argv, strings.ReplaceAll(a, "{dir}", dir))
 		}
 		if p, err := o.Look(argv[0]); err == nil {
 			argv[0] = p
@@ -149,4 +154,111 @@ func (l *limited) Write(p []byte) (int, error) {
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
 	return line
+}
+
+// FileArgv returns the command that opens file at line and column (0 when not
+// given), with folder as the editor's workspace where it has one.
+//
+//	vscode, cursor: <launcher> <folder> -g <file>:<line>:<col>
+//	zed:            <launcher> <folder> <file>:<line>:<col>
+//	idea:           <launcher> <folder> --line <line> --column <col> <file>
+//	custom:         its command with {dir}, {file}, {line} and {col}; the file is
+//	                added at the end if the command has no {file}
+//
+// Without a launcher, `open -b <bundle> <file>` opens it, at its first line.
+func (o *Opener) FileArgv(folder, file string, line, col int) ([]string, error) {
+	e := o.Editor
+	at := file
+	if line > 0 {
+		at += ":" + strconv.Itoa(line)
+		if col > 0 {
+			at += ":" + strconv.Itoa(col)
+		}
+	}
+	switch e.Preset {
+	case "":
+		return nil, ErrNotConfigured
+	case "custom":
+		if len(e.Command) == 0 {
+			return nil, errors.New("the custom editor has no command (acmd editor set custom -- <command> {file})")
+		}
+		lineText, colText := strconv.Itoa(max(line, 1)), strconv.Itoa(max(col, 1))
+		hasFile := false
+		argv := make([]string, len(e.Command))
+		for i, a := range e.Command {
+			hasFile = hasFile || strings.Contains(a, "{file}")
+			a = strings.ReplaceAll(a, "{file}", file)
+			a = strings.ReplaceAll(a, "{line}", lineText)
+			a = strings.ReplaceAll(a, "{col}", colText)
+			argv[i] = strings.ReplaceAll(a, "{dir}", folder)
+		}
+		if !hasFile {
+			argv = append(argv, file)
+		}
+		if p, err := o.Look(argv[0]); err == nil {
+			argv[0] = p
+		} else if !filepath.IsAbs(argv[0]) || !o.Exists(argv[0]) {
+			return nil, fmt.Errorf("couldn't open editor %q: not found. Run: acmd editor set", e.Command[0])
+		}
+		return argv, nil
+	}
+	preset, ok := setup.PresetByName(e.Preset)
+	if !ok {
+		return nil, fmt.Errorf("unknown editor preset %q. Run: acmd editor set", e.Preset)
+	}
+	bin := ""
+	if e.Resolved != "" && o.Exists(e.Resolved) {
+		bin = e.Resolved
+	} else if p, err := o.Look(preset.Launcher); err == nil {
+		bin = p
+	}
+	if bin == "" {
+		if argv, ok := openBundle(preset, file); ok {
+			return argv, nil
+		}
+		return nil, fmt.Errorf("couldn't open editor %q: not found. Run: acmd editor set", preset.Launcher)
+	}
+	switch preset.Name {
+	case "vscode", "cursor":
+		return []string{bin, folder, "-g", at}, nil
+	case "idea":
+		argv := []string{bin, folder}
+		if line > 0 {
+			argv = append(argv, "--line", strconv.Itoa(line))
+			if col > 0 {
+				argv = append(argv, "--column", strconv.Itoa(col))
+			}
+		}
+		return append(argv, file), nil
+	default:
+		return []string{bin, folder, at}, nil
+	}
+}
+
+// OpenFile opens file at line and column, in folder's window where it can.
+func (o *Opener) OpenFile(ctx context.Context, folder, file string, line, col int) error {
+	argv, err := o.FileArgv(folder, file, line, col)
+	if err != nil {
+		return err
+	}
+	return o.Launch(ctx, argv, o.Env, folder)
+}
+
+// SplitPosition takes a trailing ":line" or ":line:col" off a path, as compilers,
+// linters and Claude print them.
+func SplitPosition(path string) (file string, line, col int) {
+	file = path
+	for range 2 {
+		i := strings.LastIndexByte(file, ':')
+		if i < 0 {
+			break
+		}
+		n, err := strconv.Atoi(file[i+1:])
+		if err != nil || n <= 0 {
+			break
+		}
+		file = file[:i]
+		line, col = n, line
+	}
+	return file, line, col
 }

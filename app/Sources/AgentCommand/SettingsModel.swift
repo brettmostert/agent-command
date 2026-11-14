@@ -138,6 +138,8 @@ enum ShellWords {
     private(set) var report: String?
     /// The setting being changed, so its control can wait.
     private(set) var busy: String?
+    /// The section on show.
+    var section = SettingsSection.general
 
     /// Runs acmd; tests swap it.
     @ObservationIgnored var runAcmd: (_ args: [String], _ done: @escaping @MainActor (Bool, String) -> Void) -> Void = Acmd.run
