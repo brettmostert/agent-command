@@ -165,3 +165,18 @@ private func model(_ acmd: FakeAcmd) -> SettingsModel {
     #expect(ShellWords.join(["--x", "two words", ""]) == #"--x "two words" """#)
     #expect(ShellWords.split(ShellWords.join(["a b", "c"])) == ["a b", "c"])
 }
+
+@Test func theMenuBarIconIsOnUntilTurnedOff() throws {
+    let defaults = try #require(UserDefaults(suiteName: "acmd-test-menubar-\(getpid())"))
+    defer { defaults.removePersistentDomain(forName: "acmd-test-menubar-\(getpid())") }
+    let pref = MenuBarPreference(defaults: defaults)
+    var told = 0
+    pref.onChange = { told += 1 }
+    #expect(pref.shown, "on by default")
+    pref.shown = false
+    pref.shown = false
+    #expect(told == 1, "only a change is told")
+    #expect(!MenuBarPreference(defaults: defaults).shown, "kept")
+    pref.shown = true
+    #expect(told == 2 && MenuBarPreference(defaults: defaults).shown)
+}
