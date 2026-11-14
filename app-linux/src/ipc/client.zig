@@ -271,7 +271,9 @@ pub const Client = struct {
             switch (err_code) {
                 .CONNREFUSED => return error.ConnectionRefused,
                 .NOENT => return error.FileNotFound,
-                .INPROGRESS, .AGAIN => {
+                // On Linux AF_UNIX, EAGAIN means the listener backlog is full (unconnected), not pending.
+                .AGAIN => return error.WouldBlock,
+                .INPROGRESS => {
                     var pfd = [1]std.posix.pollfd{.{
                         .fd = fd,
                         .events = std.posix.POLL.OUT,
@@ -369,7 +371,7 @@ pub const Client = struct {
                     if (connectUnixCancellable(socket_path, running)) |stream| {
                         return stream;
                     } else |retry_err| switch (retry_err) {
-                        error.ConnectionRefused, error.FileNotFound => continue,
+                        error.ConnectionRefused, error.FileNotFound, error.WouldBlock => continue,
                         else => return retry_err,
                     }
                 }
