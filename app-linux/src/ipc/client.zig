@@ -8,6 +8,7 @@ pub const max_line: usize = 2 << 20; // 2 MiB, matching internal/ipc/ipc.go MaxL
 pub const Env = struct {
     acmd_runtime_dir: ?[]const u8 = null,
     xdg_runtime_dir: ?[]const u8 = null,
+    tmpdir: ?[]const u8 = null,
     acmd_state_dir: ?[]const u8 = null,
     xdg_state_home: ?[]const u8 = null,
     home: ?[]const u8 = null,
@@ -17,6 +18,7 @@ pub const Env = struct {
         return .{
             .acmd_runtime_dir = getEnv("ACMD_RUNTIME_DIR"),
             .xdg_runtime_dir = getEnv("XDG_RUNTIME_DIR"),
+            .tmpdir = getEnv("TMPDIR"),
             .acmd_state_dir = getEnv("ACMD_STATE_DIR"),
             .xdg_state_home = getEnv("XDG_STATE_HOME"),
             .home = getEnv("HOME"),
@@ -39,8 +41,11 @@ pub fn resolveSocketPath(allocator: std.mem.Allocator, env: Env) ![]u8 {
 
     const runtime_dir = if (env.xdg_runtime_dir) |xdg|
         try std.fs.path.join(allocator, &.{ xdg, "agent-command" })
-    else
-        try std.fmt.allocPrint(allocator, "/tmp/agent-command-{d}", .{env.uid});
+    else blk: {
+        const leaf = try std.fmt.allocPrint(allocator, "agent-command-{d}", .{env.uid});
+        defer allocator.free(leaf);
+        break :blk try std.fs.path.join(allocator, &.{ env.tmpdir orelse "/tmp", leaf });
+    };
     defer allocator.free(runtime_dir);
 
     const candidate = try std.fs.path.join(allocator, &.{ runtime_dir, "daemon.sock" });
@@ -71,7 +76,7 @@ pub const Hello = struct {
 pub const WatchRequest = struct {
     rev: u64,
     wait_ms: i32 = 25000,
-    app: bool = true,
+    app: bool = false,
 };
 
 pub const WatchResponse = struct {
@@ -209,16 +214,12 @@ pub const Client = struct {
     stream: std.Io.net.Stream,
     daemon_hello: Decoded(Hello),
 
-    pub fn connect(
+    pub fn initFromStream(
         allocator: std.mem.Allocator,
         io: std.Io,
-        socket_path: []const u8,
+        stream: std.Io.net.Stream,
         hello: Hello,
     ) !Client {
-        const addr = try std.Io.net.UnixAddress.init(socket_path);
-        const stream = try addr.connect(io);
-        errdefer stream.close(io);
-
         var client = Client{
             .allocator = allocator,
             .io = io,
@@ -234,6 +235,63 @@ pub const Client = struct {
         return client;
     }
 
+    pub fn connect(
+        allocator: std.mem.Allocator,
+        io: std.Io,
+        socket_path: []const u8,
+        hello: Hello,
+    ) !Client {
+        const addr = try std.Io.net.UnixAddress.init(socket_path);
+        const stream = try addr.connect(io);
+        errdefer stream.close(io);
+        return initFromStream(allocator, io, stream, hello);
+    }
+
+    /// Connects to `socket_path` without performing the `hello` exchange yet,
+    /// spawning `acmd_bin daemon` and retrying with backoff if `start_daemon` is
+    /// true and the daemon is not yet listening. Stops early if `running` flips false.
+    fn connectStream(
+        io: std.Io,
+        socket_path: []const u8,
+        acmd_bin: ?[]const u8,
+        running: ?*const std.atomic.Value(bool),
+    ) !std.Io.net.Stream {
+        const addr = try std.Io.net.UnixAddress.init(socket_path);
+        return addr.connect(io) catch |err| switch (err) {
+            error.ConnectionRefused, error.FileNotFound => {
+                const bin = acmd_bin orelse return err;
+                if (running) |r| {
+                    if (!r.load(.acquire)) return error.Cancelled;
+                }
+                _ = try std.process.spawn(io, .{
+                    .argv = &.{ bin, "daemon" },
+                    .stdin = .ignore,
+                    .stdout = .ignore,
+                    .stderr = .ignore,
+                });
+
+                const backoffs_ms = [_]u64{ 50, 100, 200, 400, 800, 1000 };
+                for (backoffs_ms) |ms| {
+                    if (running) |r| {
+                        if (!r.load(.acquire)) return error.Cancelled;
+                    }
+                    try io.sleep(.fromMilliseconds(@intCast(ms)), .awake);
+                    if (running) |r| {
+                        if (!r.load(.acquire)) return error.Cancelled;
+                    }
+                    if (addr.connect(io)) |stream| {
+                        return stream;
+                    } else |retry_err| switch (retry_err) {
+                        error.ConnectionRefused, error.FileNotFound => continue,
+                        else => return retry_err,
+                    }
+                }
+                return addr.connect(io);
+            },
+            else => return err,
+        };
+    }
+
     /// Connects to `socket_path`, spawning `acmd_bin daemon` and retrying with
     /// backoff if the daemon is not yet listening.
     pub fn connectOrStart(
@@ -243,29 +301,9 @@ pub const Client = struct {
         hello: Hello,
         acmd_bin: []const u8,
     ) !Client {
-        return connect(allocator, io, socket_path, hello) catch |err| switch (err) {
-            error.ConnectionRefused, error.FileNotFound => {
-                _ = try std.process.spawn(io, .{
-                    .argv = &.{ acmd_bin, "daemon" },
-                    .stdin = .ignore,
-                    .stdout = .ignore,
-                    .stderr = .ignore,
-                });
-
-                const backoffs_ms = [_]u64{ 50, 100, 200, 400, 800, 1000 };
-                for (backoffs_ms) |ms| {
-                    try io.sleep(.fromMilliseconds(@intCast(ms)), .awake);
-                    if (connect(allocator, io, socket_path, hello)) |c| {
-                        return c;
-                    } else |retry_err| switch (retry_err) {
-                        error.ConnectionRefused, error.FileNotFound => continue,
-                        else => return retry_err,
-                    }
-                }
-                return connect(allocator, io, socket_path, hello);
-            },
-            else => return err,
-        };
+        const stream = try connectStream(io, socket_path, acmd_bin, null);
+        errdefer stream.close(io);
+        return initFromStream(allocator, io, stream, hello);
     }
 
     pub fn deinit(self: *Client) void {
@@ -361,7 +399,8 @@ pub const WatchLoop = struct {
     userdata: ?*anyopaque,
     alive: *std.atomic.Value(bool),
     running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    active_fd: std.atomic.Value(std.posix.fd_t) = std.atomic.Value(std.posix.fd_t).init(-1),
+    fd_mutex: std.Io.Mutex = .init,
+    active_fd: std.posix.fd_t = -1,
     thread: ?std.Thread = null,
 
     pub fn start(
@@ -403,9 +442,12 @@ pub const WatchLoop = struct {
 
     pub fn stop(self: *WatchLoop) void {
         self.running.store(false, .release);
-        const fd = self.active_fd.swap(-1, .acq_rel);
-        if (fd >= 0) {
-            _ = std.c.shutdown(fd, std.c.SHUT.RDWR);
+        {
+            self.fd_mutex.lockUncancelable(self.io);
+            defer self.fd_mutex.unlock(self.io);
+            if (self.active_fd >= 0) {
+                _ = std.c.shutdown(self.active_fd, std.c.SHUT.RDWR);
+            }
         }
         if (self.thread) |t| {
             t.join();
@@ -415,6 +457,37 @@ pub const WatchLoop = struct {
         self.allocator.free(self.acmd_bin);
         self.allocator.free(self.version);
         self.allocator.destroy(self);
+    }
+
+    fn publishFd(self: *WatchLoop, fd: std.posix.fd_t) bool {
+        self.fd_mutex.lockUncancelable(self.io);
+        defer self.fd_mutex.unlock(self.io);
+        if (!self.running.load(.acquire)) return false;
+        self.active_fd = fd;
+        return true;
+    }
+
+    fn clearAndCloseStream(self: *WatchLoop, stream: std.Io.net.Stream) void {
+        self.fd_mutex.lockUncancelable(self.io);
+        defer self.fd_mutex.unlock(self.io);
+        self.active_fd = -1;
+        stream.close(self.io);
+    }
+
+    fn clearAndCloseClient(self: *WatchLoop, client: *Client) void {
+        self.fd_mutex.lockUncancelable(self.io);
+        defer self.fd_mutex.unlock(self.io);
+        self.active_fd = -1;
+        client.deinit();
+    }
+
+    fn sleepInterruptible(self: *WatchLoop, total_ms: u64) void {
+        var remaining = total_ms;
+        while (remaining > 0 and self.running.load(.acquire)) {
+            const step: u64 = @min(remaining, 100);
+            self.io.sleep(.fromMilliseconds(@intCast(step)), .awake) catch break;
+            remaining -= step;
+        }
     }
 
     fn postSnapshot(self: *WatchLoop, snap: Decoded(Snapshot)) void {
@@ -444,31 +517,41 @@ pub const WatchLoop = struct {
         var spawn_attempts: u32 = 0;
 
         while (self.running.load(.acquire)) {
-            const hello = Hello{ .version = self.version, .pid = pid };
-            var client = (if (spawn_attempts == 0 or spawn_attempts % 10 == 0)
-                Client.connectOrStart(self.allocator, self.io, self.socket_path, hello, self.acmd_bin)
+            const bin: ?[]const u8 = if (spawn_attempts == 0 or spawn_attempts % 10 == 0)
+                self.acmd_bin
             else
-                Client.connect(self.allocator, self.io, self.socket_path, hello)) catch {
+                null;
+            const stream = Client.connectStream(self.io, self.socket_path, bin, &self.running) catch {
                 spawn_attempts +|= 1;
-                self.io.sleep(.fromMilliseconds(1000), .awake) catch {};
+                self.sleepInterruptible(1000);
                 continue;
             };
-            spawn_attempts = 0;
-            self.active_fd.store(client.stream.socket.handle, .release);
-            defer {
-                _ = self.active_fd.swap(-1, .acq_rel);
-                client.deinit();
+            if (!self.publishFd(stream.socket.handle)) {
+                stream.close(self.io);
+                break;
             }
+
+            const hello = Hello{ .version = self.version, .pid = pid };
+            var client = Client.initFromStream(self.allocator, self.io, stream, hello) catch {
+                self.clearAndCloseStream(stream);
+                spawn_attempts +|= 1;
+                self.sleepInterruptible(1000);
+                continue;
+            };
+            defer self.clearAndCloseClient(&client);
+            spawn_attempts = 0;
 
             if (client.snapshot()) |snap| {
                 self.postSnapshot(snap);
             } else |_| {
-                self.io.sleep(.fromMilliseconds(500), .awake) catch {};
+                self.sleepInterruptible(500);
                 continue;
             }
 
             while (self.running.load(.acquire)) {
-                const resp = client.watch(.{ .rev = rev, .wait_ms = 25000, .app = true }) catch break;
+                // Keep app=false until notification rendering is implemented in the UI,
+                // otherwise the daemon suppresses its fallback notifier.
+                const resp = client.watch(.{ .rev = rev, .wait_ms = 25000, .app = false }) catch break;
                 if (resp.rev != rev) {
                     rev = resp.rev;
                     const snap = client.snapshot() catch break;
@@ -502,6 +585,14 @@ test "resolveSocketPath matches internal/paths/paths.go" {
     });
     defer allocator.free(p3);
     try std.testing.expectEqualStrings("/tmp/agent-command-1000/daemon.sock", p3);
+
+    const p3_tmpdir = try resolveSocketPath(allocator, .{
+        .tmpdir = "/custom/tmp/",
+        .home = "/home/u",
+        .uid = 1000,
+    });
+    defer allocator.free(p3_tmpdir);
+    try std.testing.expectEqualStrings("/custom/tmp/agent-command-1000/daemon.sock", p3_tmpdir);
 
     const long_xdg = "/very/long/xdg/runtime/directory/path/that/exceeds/macos/sun_path/limit/for/unix/domain/sockets/in/paths";
     const p4 = try resolveSocketPath(allocator, .{
