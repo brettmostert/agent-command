@@ -75,7 +75,7 @@ fi
 # a library built for a runner with AVX-512 crashes (SIGILL) on one without.
 cpu=()
 [[ "$OS" == "Linux" ]] && cpu=(-Dcpu=baseline)
-zig build -Doptimize=ReleaseFast -Demit-lib-vt=true "${cpu[@]}" --prefix "$out/vt"
+zig build -Doptimize=ReleaseFast -Demit-lib-vt=true ${cpu[@]+"${cpu[@]}"} --prefix "$out/vt"
 
 # Built in a private folder and renamed into place, so runners working at the same
 # time never see a partial cache. If another got there first, its copy stays.
