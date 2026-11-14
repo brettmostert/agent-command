@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.54.0](https://github.com/brettmostert/agent-command/compare/v0.53.1...v0.54.0) (2026-11-14)
+
+
+### Features
+
+* acmd keys lists the app's keyboard shortcuts ([#39](https://github.com/brettmostert/agent-command/issues/39)) ([9778316](https://github.com/brettmostert/agent-command/commit/9778316dd0a085e27dc7c25d914e01624851a86a))
+* **app:** a menu bar icon, with Settings and the app's places ([#38](https://github.com/brettmostert/agent-command/issues/38)) ([0e38075](https://github.com/brettmostert/agent-command/commit/0e3807500e354301e8f33070e3e68d497ad1b990))
+* open a session's folder, or a file clicked in a terminal, in your editor (PAN-38) ([#40](https://github.com/brettmostert/agent-command/issues/40)) ([0410c5b](https://github.com/brettmostert/agent-command/commit/0410c5b81c896c96a0286c45bcba1fea61c78fe8))
+
 ## [0.53.1](https://github.com/brettmostert/agent-command/compare/v0.53.0...v0.53.1) (2026-11-14)
 
 
