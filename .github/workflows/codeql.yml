@@ -72,8 +72,8 @@ jobs:
       - name: build the app and the speech helper's own code
         if: matrix.language == 'swift'
         run: |
-          # What the tracer runs the build as: the Ghostty library is arm64 only.
-          echo "arch: $(uname -m)"; swift -print-target-info | grep -m1 '"triple"'
+          # CodeQL's tracer runs the build under Rosetta, as x86_64; the Ghostty
+          # library is arm64 only, so the target is said.
           swift build --package-path app --triple arm64-apple-macosx26.0
           swift build --package-path helpers/acmd-speech --target SpeechCore --triple arm64-apple-macosx26.0
       - name: build the speech helper with MLX (main and weekly)
@@ -81,4 +81,18 @@ jobs:
         run: swift build --package-path helpers/acmd-speech --triple arm64-apple-macosx26.0
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
+          category: /language:${{ matrix.language }}
+          upload: never
+          output: sarif-results
+      # The speech helper's full build compiles its dependencies (in .build/), and
+      # their findings aren't ours to fix: they're left out.
+      - name: leave out findings in dependencies
+        run: |
+          for f in sarif-results/*.sarif; do
+            jq '(.runs[].results) |= map(select((.locations[0].physicalLocation.artifactLocation.uri // "") | test("(^|/)\\.build/") | not))' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+          done
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: sarif-results
           category: /language:${{ matrix.language }}
