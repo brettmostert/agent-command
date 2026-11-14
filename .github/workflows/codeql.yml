@@ -72,11 +72,13 @@ jobs:
       - name: build the app and the speech helper's own code
         if: matrix.language == 'swift'
         run: |
-          swift build --package-path app
-          swift build --package-path helpers/acmd-speech --target SpeechCore
+          # What the tracer runs the build as: the Ghostty library is arm64 only.
+          echo "arch: $(uname -m)"; swift -print-target-info | grep -m1 '"triple"'
+          swift build --package-path app --triple arm64-apple-macosx26.0
+          swift build --package-path helpers/acmd-speech --target SpeechCore --triple arm64-apple-macosx26.0
       - name: build the speech helper with MLX (main and weekly)
         if: matrix.language == 'swift' && github.event_name != 'pull_request'
-        run: swift build --package-path helpers/acmd-speech
+        run: swift build --package-path helpers/acmd-speech --triple arm64-apple-macosx26.0
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ matrix.language }}
