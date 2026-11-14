@@ -10,6 +10,8 @@ func ghostty_init_ok() -> Bool {
 /// is unstable.
 final class GhosttyRuntime {
     static let shared = GhosttyRuntime()
+    /// Opens a file clicked in a terminal, given the session it was in.
+    var onOpenFile: ((FileLink, String?) -> Void)?
 
     let app: ghostty_app_t
     /// The resolved config, kept for reading colors from.
@@ -112,11 +114,16 @@ final class GhosttyRuntime {
         case GHOSTTY_ACTION_OPEN_URL:
             let link = action.action.open_url
             let text = TerminalLinks.string(link.url, Int(link.len))
-            guard let url = TerminalLinks.url(text) else {
-                trace("ghostty link not opened: not a web or mail link")
-                return true
+            if let url = TerminalLinks.url(text) {
+                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            } else if let file = FileLink.from(text) {
+                // A file opens in your editor, never by itself: it could be an app or a script.
+                let view = target.tag == GHOSTTY_TARGET_SURFACE
+                    ? SurfaceView.from(ghostty_surface_userdata(target.target.surface)) : nil
+                DispatchQueue.main.async { GhosttyRuntime.shared.onOpenFile?(file, view?.sessionID) }
+            } else {
+                trace("ghostty link not opened: not a web or mail link, or a file")
             }
-            DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             return true
         case GHOSTTY_ACTION_MOUSE_OVER_LINK:
             let link = action.action.mouse_over_link

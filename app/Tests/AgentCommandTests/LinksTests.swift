@@ -26,3 +26,29 @@ import Testing
     #expect(TerminalLinks.string(nil, 3).isEmpty)
     #expect("abc".withCString { TerminalLinks.string($0, 0) }.isEmpty)
 }
+
+@Test func pathsInATerminalAreFiles() {
+    #expect(FileLink.from("src/app/main.swift:42") == FileLink(path: "src/app/main.swift", line: 42))
+    #expect(FileLink.from("./build/out") == FileLink(path: "./build/out"))
+    #expect(FileLink.from("/usr/bin/env") == FileLink(path: "/usr/bin/env"))
+    #expect(FileLink.from("~/notes.md:3:7") == FileLink(path: "~/notes.md", line: 3, column: 7))
+    #expect(FileLink.from("../x/y.go:0") == FileLink(path: "../x/y.go:0"), "line 0 isn't a line")
+    #expect(FileLink.from("file:///Users/me/a%20b.txt") == FileLink(path: "/Users/me/a b.txt"))
+    #expect(FileLink.from("file://localhost/etc/hosts") == FileLink(path: "/etc/hosts"))
+    #expect(FileLink.from("  /tmp/x:1:2:3 ") == FileLink(path: "/tmp/x:1", line: 2, column: 3))
+    for text in ["https://example.com/a.go", "example.com/docs", "file://otherhost/etc/hosts", "ssh://host/x",
+                 "x-apple.systempreferences:", "main.go", "", "not a path", "mailto:a@b.c"] {
+        #expect(FileLink.from(text) == nil, "\(text) isn't a file")
+    }
+}
+
+@Test func aFileIsFoundFromTheSessionsFolder() {
+    let link = FileLink(path: "src/../src/main.go", line: 4, column: 2)
+    #expect(link.resolved(in: "/w/proj") == "/w/proj/src/main.go")
+    #expect(FileLink(path: "/abs/x").resolved(in: "/w") == "/abs/x")
+    #expect(FileLink(path: "~/n.md").resolved(in: "/w", home: "/Users/me") == "/Users/me/n.md")
+    #expect(FileLink(path: "~").resolved(in: "/w", home: "/Users/me") == "/Users/me")
+    #expect(link.editArguments(in: "/w/proj") == ["edit", "--in", "/w/proj", "/w/proj/src/main.go", "--line", "4", "--column", "2"])
+    #expect(FileLink(path: "a.go", line: 9).editArguments(in: "/w") == ["edit", "--in", "/w", "/w/a.go", "--line", "9"])
+    #expect(FileLink(path: "a.go").editArguments(in: "/w") == ["edit", "--in", "/w", "/w/a.go"])
+}

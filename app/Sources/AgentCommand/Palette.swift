@@ -32,6 +32,7 @@ enum PaletteAction: Equatable {
     case toggleSidebar
     case report(ReportKind)
     case shortcuts
+    case openInEditor(Session)
     case settings
     case quit
 }
@@ -96,6 +97,10 @@ enum Palette {
             list.append(PaletteEntry(section: section, title: "Archive…", shortcut: keys.label(.archive), action: .archive([session])))
             if state.setMembers.contains(where: { $0.contains(session.id) }) {
                 list.append(PaletteEntry(section: section, title: "Move out of set", action: .moveOut(sessionID: session.id)))
+            }
+            if !session.cwd.isEmpty {
+                list.append(PaletteEntry(
+                    section: section, title: "Open in editor", shortcut: keys.label(.openInEditor), action: .openInEditor(session)))
             }
             list.append(PaletteEntry(section: section, title: "Copy folder path", action: .copy(session.cwd)))
             if !session.isTerminal {

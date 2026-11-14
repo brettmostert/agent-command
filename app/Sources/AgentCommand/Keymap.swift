@@ -248,6 +248,7 @@ enum KeyAction: String, CaseIterable, Identifiable {
     case togglePopup = "app.toggle-popup"
     case shortcuts = "app.shortcuts"
     case settings = "app.settings"
+    case openInEditor = "app.open-editor"
     case quit = "app.quit"
 
     case splitRight = "panes.split-right"
@@ -326,6 +327,7 @@ enum KeyAction: String, CaseIterable, Identifiable {
         case .togglePopup: "Turn the popup on or off"
         case .shortcuts: "Keyboard shortcuts"
         case .settings: "Settings"
+        case .openInEditor: "Open in your editor"
         case .quit: "Quit"
         case .splitRight: "Split right"
         case .splitDown: "Split down"
@@ -368,6 +370,7 @@ enum KeyAction: String, CaseIterable, Identifiable {
         case .focusSidebar: "In the Inbox: switches between sessions and messages."
         case .rename: "In Scheduled: edits the job."
         case .archive: "In Scheduled: deletes the job."
+        case .openInEditor: "The session's folder. ⌘-click a file in a terminal to open it at its line."
         case .closePane: "Closes the Inbox, the popup or Scheduled when one is open."
         case .open: "In the Inbox, on the open message: answer or reply. In Scheduled: edit."
         case .nextNeedingYou: "In the sidebar: the next session. In the Inbox: the next unread message."
@@ -396,6 +399,7 @@ enum KeyAction: String, CaseIterable, Identifiable {
         case .togglePopup: ["opt+cmd+i"]
         case .shortcuts: ["cmd+/"]
         case .settings: ["cmd+,"]
+        case .openInEditor: ["shift+cmd+e"]
         case .quit: ["cmd+q"]
         case .splitRight: ["cmd+return"]
         case .splitDown: ["shift+cmd+return"]

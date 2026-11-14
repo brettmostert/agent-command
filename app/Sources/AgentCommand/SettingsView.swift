@@ -46,11 +46,10 @@ struct SettingsView: View {
     let notifier: AppNotifier
     let shortcuts: ShortcutsModel
     let chooseTheme: () -> Void
-    @State var section: SettingsSection = .general
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsSection.allCases, selection: $section) { section in
+            List(SettingsSection.allCases, selection: $model.section) { section in
                 Label(section.title, systemImage: section.icon).tag(section)
             }
             .navigationSplitViewColumnWidth(190)
@@ -69,6 +68,8 @@ struct SettingsView: View {
         }
         .onAppear { model.load() }
     }
+
+    private var section: SettingsSection { model.section }
 
     @ViewBuilder private var page: some View {
         switch section {
@@ -420,7 +421,7 @@ private struct EditorSettings: View {
                             .disabled(ShellWords.split(custom).isEmpty)
                     }
                 }
-                Text("{dir} is the folder; it's added at the end if left out.").font(.caption).foregroundStyle(.secondary)
+                Text("{dir} is the folder, added at the end if left out. For a file clicked in a terminal: {file}, {line} and {col}, or the file is added at the end.").font(.caption).foregroundStyle(.secondary)
             }
         }
         Section {

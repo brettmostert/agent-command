@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var menuItems: [KeyAction: NSMenuItem] = [:]
     private var shortcuts: ShortcutsModel?
     private var settingsWindow: NSWindow?
+    private var settingsModel: SettingsModel?
     private var statusItem: NSStatusItem?
     private var settingsClosed: NSObjectProtocol?
     /// A clicked notification's session, if it arrived before the session list.
@@ -69,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     self.showRename(self.store.actionTargets(forRow: session))
                 },
                 openInbox: { [weak self] session in self?.showInbox(.session(session.id)) },
+                openInEditor: { [weak self] session in self?.openInEditor(session) },
                 moveOut: { [weak self] session in self?.pane?.moveOut(sessionID: session.id) },
                 openSet: { [weak self] session in self?.pane?.showSet(containing: session.id) },
                 clickRow: { [weak self] session in self?.clickSidebarRow(session) },
@@ -557,6 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         notifier.popupShows = { [weak self] kind in self?.popupWindow.replacesBanner(noticeKind: kind) ?? false }
         registerHotKeys()
         Keymap.shared.onChange = { [weak self] in self?.keysChanged() }
+        GhosttyRuntime.shared.onOpenFile = { [weak self] file, session in self?.openFile(file, from: session) }
         Keymap.shared.writeExport()
     }
 
@@ -660,6 +663,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         scheduled = model
     }
 
+    // MARK: Your editor
+
+    @objc private func openSelectionInEditor() {
+        guard let session = store.actionTargets.first else { return NSSound.beep() }
+        openInEditor(session)
+    }
+
+    /// The session's folder, in the editor chosen in Settings → Editor.
+    private func openInEditor(_ session: Session) {
+        guard !session.cwd.isEmpty else { return NSSound.beep() }
+        Acmd.run(["open", session.id]) { [weak self] ok, output in
+            if !ok { self?.editorFailed(output) }
+        }
+    }
+
+    /// A file ⌘-clicked in a terminal: a relative path is in that session's folder. A
+    /// file that isn't there is only a beep, as text that looks like a path often isn't.
+    private func openFile(_ file: FileLink, from sessionID: String?) {
+        let folder = sessionID.flatMap { id in store.sessions.first { $0.id == id }?.cwd }.flatMap { $0.isEmpty ? nil : $0 }
+            ?? NSHomeDirectory()
+        guard FileManager.default.fileExists(atPath: file.resolved(in: folder)) else { return NSSound.beep() }
+        Acmd.run(file.editArguments(in: folder)) { [weak self] ok, output in
+            if !ok { self?.editorFailed(output) }
+        }
+    }
+
+    private func editorFailed(_ output: String) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't open your editor"
+        alert.informativeText = output.isEmpty ? "acmd didn't say why." : output
+        let choose = output.contains("no editor chosen") || output.contains("acmd editor set")
+        if choose {
+            alert.addButton(withTitle: "Choose an Editor…")
+            alert.addButton(withTitle: "Cancel")
+        }
+        if alert.runModal() == .alertFirstButtonReturn, choose {
+            openSettings(at: .editor)
+        }
+    }
+
     // MARK: The menu bar icon
 
     /// The app's icon in the menu bar: its places and Settings, from any app, even with
@@ -730,12 +773,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// Every setting, in a window of its own that can stay open beside the sessions.
     @objc private func showSettings() {
+        openSettings(at: nil)
+    }
+
+    private func openSettings(at section: SettingsSection?) {
         NSApp.activate(ignoringOtherApps: true)
         if let settingsWindow {
+            if let section { settingsModel?.section = section }
             settingsWindow.makeKeyAndOrderFront(nil)
             return
         }
         let model = SettingsModel()
+        if let section { model.section = section }
+        settingsModel = model
         model.ghosttyChanged = { GhosttyRuntime.shared.reloadConfig() }
         model.voiceChanged = { SpeechController.shared.voiceChanged() }
         let keys = ShortcutsModel()
@@ -764,6 +814,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             if let observer = self?.settingsClosed { NotificationCenter.default.removeObserver(observer) }
             self?.settingsClosed = nil
             self?.settingsWindow = nil
+            self?.settingsModel = nil
         }
         settingsWindow = window
         window.makeKeyAndOrderFront(nil)
@@ -875,6 +926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case .toggleSidebar: split?.toggleSidebar(nil)
         case .report(let kind): showReport(kind)
         case .shortcuts: showShortcuts()
+        case .openInEditor(let session): openInEditor(session)
         case .settings: showSettings()
         case .quit: NSApp.terminate(nil)
         }
@@ -975,6 +1027,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             ("Scheduled Jobs", #selector(toggleScheduled), .scheduled),
             ("Read Aloud", #selector(toggleReading), .readAloud),
             ("Rename…", #selector(renameSelection), .rename),
+            ("Open in Editor", #selector(openSelectionInEditor), .openInEditor),
             ("Turn Popup On or Off", #selector(togglePopupEnabled), .togglePopup),
         ] {
             file.submenu?.addItem(menuItem(title, action, key))
