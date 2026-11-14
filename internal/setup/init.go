@@ -329,3 +329,21 @@ func SaveSetting(configFile, section, key string, value any) error {
 	}
 	return writeAtomic(configFile, []byte(text), 0o600, false)
 }
+
+// RetireOld takes acmd v1's settings out of config.toml (config.Retire), keeping
+// the rest as it is, and says whether it changed the file. The background
+// service runs it as it starts, so an upgrade tidies the file without `acmd init`.
+func RetireOld(configFile string) (bool, error) {
+	b, err := os.ReadFile(configFile) // #nosec G304 -- acmd's own config file
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	text, err := config.Retire(string(b))
+	if err != nil || text == string(b) {
+		return false, err
+	}
+	return true, writeAtomic(configFile, []byte(text), 0o600, false)
+}
