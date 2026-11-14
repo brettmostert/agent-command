@@ -14,7 +14,7 @@
 |---|---|---|
 | `ci.yml` | Every PR | `make lint`, the speech engine, `make vuln`, `make secrets`, and `make test` → `make fuzz` → `make test-vt` → `make test-app` → build the app |
 | `pr-title.yml` | PRs | Conventional Commit title check |
-| CodeQL (default setup) | PRs, pushes to `main`, weekly | Scans the Go, Swift and workflow code, in the repo's Security tab. It isn't a required check |
+| `codeql.yml` | PRs, pushes to `main`, Mondays | CodeQL scans the Go (as macOS builds it), Swift and workflow code, into the repo's Security tab. Swift builds the app on the cached Ghostty build, and the speech helper's own code; the helper with MLX, a long build of other people's code, only on `main` and Mondays. It replaces GitHub's default setup, which must stay off for it to upload, and it isn't a required check |
 | `ghostty-watch.yml` | Mondays | Opens an issue for a newer Ghostty release, or an advisory not in `.github/ghostty-advisories-reviewed.txt`. Dependabot can't watch Ghostty, as `scripts/build-ghostty.sh` pins it |
 | `release.yml` | push to `main` | release-please; on a release: gate (`make ci fuzz`), then build and sign the app, publish it to the public tap and update the cask. |
 
