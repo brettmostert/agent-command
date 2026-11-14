@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return [AppWarning(
                 id: "wake", title: advice.title, detail: advice.detail,
                 fix: "Turn on waking the Mac: macOS asks for your password once.",
-                actionTitle: "Turn On…", action: { self?.turnWakeOn(advice.args) })]
+                actionTitle: advice.actionTitle, action: { self?.turnWakeOn(advice.args) })]
         }
         notifier.start()
         store.onNotices = { [weak notifier] notices in notifier?.receive(notices) }

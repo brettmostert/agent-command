@@ -27,10 +27,13 @@ func (f *fakeRun) run(_ context.Context, name string, args ...string) ([]byte, e
 	}
 	switch {
 	case strings.HasPrefix(call, sudo+" -n -l "):
-		if !f.allowed {
-			return nil, errors.New("exit status 1")
-		}
+		// An admin may run pmset, with a password: this asks no more than that.
 		return []byte(pmset + "\n"), nil
+	case call == sudo+" -n -l":
+		if f.allowed {
+			return []byte(adminList + "    (root) NOPASSWD: " + pmset + " ^schedule (cancel )?wake [0-9]{2}/[0-9]{2}/[0-9]{2}\n"), nil
+		}
+		return []byte(adminList), nil
 	case call == pmset+" -g sched":
 		return []byte(f.sched), nil
 	}
@@ -79,7 +82,9 @@ func TestMacCommands(t *testing.T) {
 	}
 	want := []string{
 		sudo + " -n -l " + pmset + " schedule wake 01/01/30 00:00:00 agent-command",
+		sudo + " -n -l",
 		sudo + " -n -l " + pmset + " schedule wake 01/01/30 00:00:00 agent-command",
+		sudo + " -n -l",
 		pmset + " -g sched",
 		sudo + " -n " + pmset + " schedule wake 11/14/26 08:58:30 agent-command",
 		sudo + " -n " + pmset + " schedule cancel wake 11/14/26 08:58:30 agent-command",
@@ -243,5 +248,29 @@ func TestRuleAndScripts(t *testing.T) {
 	as := AppleScript(`echo "a\b"`, `Allow "it"`)
 	if as != `do shell script "echo \"a\\b\"" with prompt "Allow \"it\"" with administrator privileges` {
 		t.Error(as)
+	}
+}
+
+// What sudo -l lists for an admin: anything, with a password.
+const adminList = `Matching Defaults entries for me on mac:
+    env_reset
+
+User me may run the following commands on mac:
+    (ALL) ALL
+`
+
+func TestPasswordlessNeedsNOPASSWDForPmset(t *testing.T) {
+	for list, want := range map[string]bool{
+		adminList: false,
+		"":        false,
+		adminList + "    (root) NOPASSWD: /usr/bin/pmset ^schedule wake\n": true,
+		"    (ALL) NOPASSWD: ALL\n":                                        true,
+		"    (root) NOPASSWD: /usr/bin/true, /usr/bin/pmset\n":             true,
+		"    (root) NOPASSWD: /usr/bin/true, PASSWD: /usr/bin/pmset\n":     false,
+		"    (root) NOPASSWD: /usr/bin/pmsetx\n":                           false,
+	} {
+		if got := passwordless(list); got != want {
+			t.Errorf("%q: %v, want %v", list, got, want)
+		}
 	}
 }

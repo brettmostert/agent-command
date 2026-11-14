@@ -198,4 +198,12 @@ private func decodeJob(_ fields: [String: Any]) throws -> Job {
     #expect(one.args == ["schedule", "wake", "on"] && one.detail.hasPrefix("Brief is set to wake the Mac"))
     let two = try #require(WakeAdvice.check(WakeState(), jobs: [waking, waking]))
     #expect(two.detail.hasPrefix("2 jobs are set to wake the Mac"))
+
+    // On, but setting the wake failed: said, for jobs that wake the Mac.
+    let failed = WakeState(allowed: true, error: "set a wake: sudo: a password is required")
+    let retry = try #require(WakeAdvice.check(failed, jobs: [waking]))
+    #expect(retry.actionTitle == "Set Up Again…" && retry.detail.hasSuffix("sudo: a password is required"))
+    #expect(WakeAdvice.check(failed, jobs: [due]) == nil, "no job wakes the Mac")
+    #expect(WakeAdvice.check(WakeState(allowed: true, all: true, error: "x"), jobs: [due]) != nil, "every job does")
+    #expect(one.actionTitle == "Turn On…")
 }
