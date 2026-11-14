@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.1](https://github.com/brettmostert/agent-command/compare/v0.53.0...v0.53.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **wake:** an admin's sudo isn't the rule, and failed wakes are warned about ([#36](https://github.com/brettmostert/agent-command/issues/36)) ([7747f38](https://github.com/brettmostert/agent-command/commit/7747f388585f72f860b09bc1e9e5dd68bfd8ebc4))
+
 ## [0.53.0](https://github.com/brettmostert/agent-command/compare/v0.52.0...v0.53.0) (2026-11-14)
 
 
