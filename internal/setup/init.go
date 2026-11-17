@@ -25,6 +25,11 @@ type Input struct {
 	Editor     *config.Editor // the editor choice to save; nil = leave as is
 	LoginEnv   LoginEnv       // nil = leave env.json as is
 	Read       func(string) ([]byte, error)
+
+	// AntigravityDir holds agy's hooks.json (AntigravityConfigDir); "" = leave it alone.
+	AntigravityDir string
+	// AgyPath is the resolved agy binary; "" = not installed, so no hooks for it.
+	AgyPath string
 }
 
 // ClaudeSettingsFile is the user settings file hooks go into.
@@ -34,6 +39,9 @@ func (in Input) ClaudeSettingsFile() string { return filepath.Join(in.ClaudeDir,
 func PlanInit(in Input) (*Plan, error) {
 	p := &Plan{}
 	if err := planClaude(p, in, true); err != nil {
+		return nil, err
+	}
+	if err := planAntigravity(p, in, true); err != nil {
 		return nil, err
 	}
 	if err := planConfig(p, in); err != nil {
@@ -59,11 +67,14 @@ func PlanInit(in Input) (*Plan, error) {
 	return p, nil
 }
 
-// PlanUninstall plans `acmd uninstall`: acmd's hook entries go, and
-// nothing else is touched.
+// PlanUninstall plans `acmd uninstall`: acmd's hook entries go (Claude's and
+// Antigravity's), and nothing else is touched.
 func PlanUninstall(in Input) (*Plan, error) {
 	p := &Plan{}
 	if err := planClaude(p, in, false); err != nil {
+		return nil, err
+	}
+	if err := planAntigravity(p, in, false); err != nil {
 		return nil, err
 	}
 	return p, nil

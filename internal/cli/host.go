@@ -53,8 +53,8 @@ type hostOptions struct {
 func hostArgv(h harness.Harness, o hostOptions) []string {
 	if o.Resume != "" {
 		argv := h.Resume(o.Resume, o.Args)
-		if o.Prompt != "" && h.StatusSource() == harness.StatusHooks { // an agent, not a shell
-			argv = append(argv, "--", o.Prompt)
+		if p, ok := h.(harness.Prompter); ok && o.Prompt != "" { // an agent, not a shell
+			argv = append(argv, p.PromptArgs(o.Prompt)...)
 		}
 		return argv
 	}
@@ -90,6 +90,12 @@ func hostHarness(p paths.Paths, name string) (harness.Harness, []string, error) 
 			return nil, nil, err
 		}
 		return harness.Claude{Path: claude, RemoteControl: cfg.RemoteControl}, env, nil
+	case core.HarnessAntigravity:
+		agy, env, err := agyCommand(p)
+		if err != nil {
+			return nil, nil, err
+		}
+		return harness.Antigravity{Path: agy}, env, nil
 	case core.HarnessTerminal:
 		env := loginEnv(p)
 		shell := setup.DefaultShell() // zsh on macOS; bash, or sh, on Linux
@@ -160,7 +166,7 @@ func newHostServeCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&o.ID, "session", "", "the acmd session")
-	f.StringVar(&o.Harness, "harness", "", "what the session runs: claude (default) or terminal")
+	f.StringVar(&o.Harness, "harness", "", "what the session runs: claude (default), antigravity or terminal")
 	f.StringVar(&o.Dir, "dir", "", "the folder to run in")
 	f.StringVar(&o.Name, "name", "", "the session's name")
 	f.StringVar(&o.Prompt, "prompt", "", "the first prompt")
@@ -174,6 +180,12 @@ type execHosts struct{ paths paths.Paths }
 
 // Start implements daemon.Hosts.
 func (h execHosts) Start(_ context.Context, r daemon.HostRequest) error {
+	if r.Harness == core.HarnessAntigravity {
+		// Here, not in the host: its errors only reach the daemon's log.
+		if _, _, err := agyCommand(h.paths); err != nil {
+			return err
+		}
+	}
 	exe, err := executable()
 	if err != nil {
 		return err

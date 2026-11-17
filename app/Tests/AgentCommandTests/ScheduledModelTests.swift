@@ -165,12 +165,13 @@ private func job(_ id: String, _ name: String, cwd: String = "/w") -> Job {
     other.groupID = "G"
     let s = try makeSession(id: "S1", name: "standup")
     let term = try makeSession(id: "T1", name: "shell", harness: "terminal")
-    let board = try Board(jobs: [job("A", "alpha"), other], sessions: [s, term])
+    let ag = try makeSession(id: "G1", name: "gravity", harness: "antigravity")
+    let board = try Board(jobs: [job("A", "alpha"), other], sessions: [s, term, ag])
     board.store.groups = [SessionGroup(id: "G", name: "Scheduled")]
     let model = board.model
     #expect(model.sessionName("S1") == "standup" && model.sessionName("nope") == nil)
     #expect(model.groupName("G") == "Scheduled" && model.groupName("") == "Default")
-    #expect(model.continuableSessions.map(\.id) == ["S1"], "terminals without Claude can't continue")
+    #expect(model.continuableSessions.map(\.id) == ["S1"], "terminals without Claude, and other agents, can't continue")
 
     // A job deleted elsewhere moves the selection on.
     model.select("B")

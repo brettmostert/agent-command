@@ -619,3 +619,62 @@ func TestDenyingAPermissionEndsWaiting(t *testing.T) {
 		t.Errorf("inbox: %+v, want the permission no longer relevant", items)
 	}
 }
+
+// An Antigravity session learns its conversation id from agy's first hook, and
+// resumes by it; one that never had a conversation starts afresh.
+func TestHostedAntigravitySession(t *testing.T) {
+	p := testPaths(t)
+	fh := &fakeHosts{paths: p}
+	start(t, p, func(c *Config) { c.Hosts = fh })
+	c := dial(t, p)
+	s := newSess(t, c, ipc.NewRequest{Cwd: "/w/api", Harness: core.HarnessAntigravity, Prompt: "go"})
+	if s.Harness != core.HarnessAntigravity || s.ClaudeSessionID != "" || s.Status != core.StatusStarting {
+		t.Fatalf("new session: %+v", s)
+	}
+	if r := fh.requests(); len(r) != 1 || r[0].Harness != core.HarnessAntigravity || r[0].ClaudeSession != "" || r[0].Prompt != "go" {
+		t.Fatalf("host request: %+v", r)
+	}
+
+	hc := ipc.HookContext{HostSession: s.ID, ClaudePid: 4242}
+	now := time.Now()
+	for i, h := range []struct {
+		event, payload string
+		want           core.Status
+	}{
+		{"antigravity:SessionStart", `{"conversationId":"conv-1","cwd":"/w/api"}`, core.StatusDone},
+		{"antigravity:PreInvocation", `{"conversationId":"conv-1","lastUserInput":"go"}`, core.StatusBusy},
+		{"antigravity:PostToolUse", `{"conversationId":"conv-1","toolCall":{"name":"run_command"}}`, core.StatusBusy},
+		{"antigravity:Stop", `{"conversationId":"conv-1","terminationReason":"ERROR","error":"quota"}`, core.StatusError},
+		{"antigravity:Stop", `{"conversationId":"conv-1","terminationReason":"NO_TOOL_CALL"}`, core.StatusDone},
+	} {
+		must(t, c.Call(ipc.OpEvent, hookEvent(h.event, h.payload, now.Add(time.Duration(i)*time.Millisecond), hc), nil))
+		got := snapshot(t, c).Sessions
+		if len(got) != 1 || got[0].Status != h.want || got[0].ClaudeSessionID != "conv-1" {
+			t.Fatalf("after %s: %+v", h.event, got)
+		}
+	}
+
+	// An agy hook naming no session of ours makes no row.
+	must(t, c.Call(ipc.OpEvent, hookEvent("antigravity:SessionStart", `{"conversationId":"stray"}`, now, ipc.HookContext{HostSession: "gone"}), nil))
+	if n := len(snapshot(t, c).Sessions); n != 1 {
+		t.Errorf("a stray agy hook made a row: %d sessions", n)
+	}
+
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutFinish, ID: s.ID})
+	waitHost(t, p, s.ID, false)
+	must(t, c.Call(ipc.OpResume, ipc.Mutation{ID: s.ID}, nil))
+	waitHost(t, p, s.ID, true)
+	if r := fh.requests(); len(r) != 2 || r[1].Resume != "conv-1" || r[1].Harness != core.HarnessAntigravity {
+		t.Errorf("resume request: %+v", r)
+	}
+
+	// No conversation yet: resuming starts a new agy.
+	n := newSess(t, c, ipc.NewRequest{Cwd: "/w/api", Harness: core.HarnessAntigravity})
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutFinish, ID: n.ID})
+	waitHost(t, p, n.ID, false)
+	must(t, c.Call(ipc.OpResume, ipc.Mutation{ID: n.ID}, nil))
+	waitHost(t, p, n.ID, true)
+	if r := fh.requests(); len(r) != 4 || r[3].Resume != "" || r[3].ID != n.ID {
+		t.Errorf("fresh request: %+v", r)
+	}
+}

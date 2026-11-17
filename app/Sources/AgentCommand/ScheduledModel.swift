@@ -51,9 +51,9 @@ final class ScheduledModel {
     /// Save stays pressable while there are problems: pressing it shows them all.
     var canSave: Bool { draft != nil && !saving }
 
-    /// The sessions a job can continue: Claude sessions acmd runs.
+    /// The sessions a job can continue: Claude sessions acmd runs. Jobs run only Claude.
     var continuableSessions: [Session] {
-        store.sessions.filter { !$0.isTerminal || !$0.claudeSessionID.isEmpty }
+        store.sessions.filter { $0.isClaude || !$0.claudeSessionID.isEmpty }
     }
 
     func sessionName(_ id: String) -> String? {
@@ -239,6 +239,7 @@ final class ScheduledModel {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = directory
         panel.canChooseFiles = !directory
+        panel.canCreateDirectories = directory
         panel.allowsMultipleSelection = false
         if !directory { panel.allowedContentTypes = [.init(filenameExtension: "md")!, .plainText] }
         if !start.isEmpty { panel.directoryURL = URL(fileURLWithPath: start) }

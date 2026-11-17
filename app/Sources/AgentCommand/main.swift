@@ -299,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// The pane opens once the terminal has started, so a failed start leaves none.
     private func splitPane(_ direction: SplitDirection) {
         let folder = store.selected?.cwd ?? lastFolder?.path ?? NSHomeDirectory()
-        store.newSession(harness: "terminal", in: folder) { [weak self] session in
+        store.newSession(harness: Harness.terminal.rawValue, in: folder) { [weak self] session in
             self?.pane?.split(direction, session: session.id)
         }
     }
@@ -421,21 +421,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    @objc private func newClaudeSession() { newSession(harness: "claude") }
+    /// ⌘N: a session with the default harness, Claude.
+    @objc private func newDefaultSession() { newSession(harness: Harness.defaultForNew) }
 
-    @objc private func newTerminal() { newSession(harness: "terminal") }
+    @objc private func newTerminal() { newSession(harness: .terminal) }
 
-    private func newSession(harness: String) {
+    /// A popup asking which harness, then the folder panel.
+    @objc private func chooseHarness() {
+        closePopup()
+        showMainWindow()
+        showPopup(HarnessPickerView(
+            close: { [weak self] in self?.closePopup() },
+            choose: { [weak self] harness in
+                self?.closePopup()
+                // After closing, as the folder panel is modal.
+                DispatchQueue.main.async { self?.newSession(harness: harness) }
+            }
+        ))
+    }
+
+    private func newSession(harness: Harness) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = harness == "terminal" ? "Open Terminal" : "Start Session"
+        panel.prompt = harness.panelPrompt
         panel.message = "Choose the folder for the new session"
         panel.directoryURL = lastFolder
         guard panel.runModal() == .OK, let url = panel.url else { return }
         lastFolder = url
-        store.newSession(harness: harness, in: url.path)
+        store.newSession(harness: harness.rawValue, in: url.path)
     }
 
     /// A popup to pick an earlier Claude session, or enter its id.
@@ -740,7 +756,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         add("Open Agent Command", #selector(menuBarOpen))
         add(waiting > 0 ? "Inbox (\(waiting) waiting)" : "Inbox", #selector(menuBarInbox))
         add("Scheduled Jobs", #selector(menuBarScheduled))
-        add("New Claude Session", #selector(menuBarNewSession))
+        add("New \(Harness.defaultForNew.title) Session", #selector(menuBarNewSession))
+        add("New Session…", #selector(menuBarChooseHarness))
         menu.addItem(.separator())
         add("Reply Popup", #selector(togglePopupEnabled)).state = PopupSettings.shared.enabled ? .on : .off
         menu.addItem(.separator())
@@ -764,7 +781,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func menuBarNewSession() {
         showMainWindow()
-        newClaudeSession()
+        newDefaultSession()
+    }
+
+    @objc private func menuBarChooseHarness() {
+        showMainWindow()
+        chooseHarness()
     }
 
     @objc private func menuBarShortcuts() {
@@ -904,7 +926,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case .copy(let text): Self.copyToPasteboard(text)
         case .select(let id): store.selectedID = id
         case .nextAttention: showNextAttention()
-        case .newSession(let harness): newSession(harness: harness)
+        case .newSession(let name): if let harness = Harness(rawValue: name) { newSession(harness: harness) }
+        case .chooseHarness: chooseHarness()
         case .resume: resumeSession()
         case .split(let direction): splitPane(direction)
         case .closePane: closePane()
@@ -1017,8 +1040,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let file = NSMenuItem()
         file.submenu = NSMenu(title: "File")
         for (title, action, key) in [
-            ("New Claude Session", #selector(newClaudeSession), KeyAction.newClaude),
+            ("New \(Harness.defaultForNew.title) Session", #selector(newDefaultSession), KeyAction.newClaude),
             ("New Terminal", #selector(newTerminal), .newTerminal),
+            ("New Session…", #selector(chooseHarness), .newSession),
             ("Resume Session…", #selector(resumeSession), .resume),
             ("Commands…", #selector(toggleCommands), .commands),
             ("Change Theme…", #selector(showThemes), .themes),

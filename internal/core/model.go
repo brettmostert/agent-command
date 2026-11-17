@@ -55,6 +55,9 @@ const (
 const (
 	HarnessClaude   = "claude"
 	HarnessTerminal = "terminal"
+	// HarnessAntigravity is Google's Antigravity CLI (agy). Its conversation id
+	// is kept in ClaudeSessionID too.
+	HarnessAntigravity = "antigravity"
 )
 
 // NameSource says whether a session's name may still be replaced automatically.
@@ -105,7 +108,7 @@ type Session struct {
 	StatusDetail    string
 	Unseen          bool
 	Kind            Kind
-	Harness         string // HarnessClaude or HarnessTerminal
+	Harness         string // HarnessClaude, HarnessTerminal or HarnessAntigravity
 	BgID            string
 	Pid             int
 	External        *PaneLoc
@@ -144,6 +147,10 @@ func (s *Session) Managed() bool { return s.Kind == KindBackground || s.Kind == 
 // IsTerminal reports whether s is a terminal session. It may have an agent
 // running in it, typed by the user, whose status it then shows.
 func (s *Session) IsTerminal() bool { return s.Harness == HarnessTerminal }
+
+// IsAntigravity reports whether s runs Antigravity's CLI. It can't be told its
+// conversation id up front, and Claude's listing never shows it.
+func (s *Session) IsAntigravity() bool { return s.Harness == HarnessAntigravity }
 
 // TakeAgentEvent reports whether a terminal should apply an event from an
 // agent running in it, and adopts that agent if it has none. The last agent to

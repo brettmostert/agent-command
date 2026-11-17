@@ -475,8 +475,10 @@ struct InboxModelTests {
         let h = try Harness(queue: [], sessions: [
             try waiting("waiting"), try makeSession(id: "done", status: "done", claude: "c"),
             try makeSession(id: "busy", status: "busy", claude: "c"), try makeSession(id: "gone", status: "paused", claude: "c"),
-            try makeSession(id: "none", status: "done"),
+            try makeSession(id: "none", status: "done"), try makeSession(id: "ag", harness: "antigravity", status: "done"),
         ])
+        #expect(h.model.answerable(try makeItem(1, session: "busy")) == "Claude is busy. Your draft is kept.")
+        #expect(h.model.answerable(try makeItem(1, session: "ag")) == "Antigravity isn't running in this session.")
         #expect(h.model.answerable(try question(1, "waiting")) == nil)
         #expect(h.model.answerable(try question(1, "done")) != nil)
         #expect(h.model.answerable(try makeItem(1, session: "done")) == nil)

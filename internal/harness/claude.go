@@ -37,10 +37,13 @@ func (c Claude) Command(sp Spec) []string {
 	}
 	argv = append(argv, args...)
 	if prompt != "" {
-		argv = append(argv, "--", prompt)
+		argv = append(argv, c.PromptArgs(prompt)...)
 	}
 	return argv
 }
+
+// PromptArgs implements Prompter: after `--`, so a prompt can't be read as a flag.
+func (Claude) PromptArgs(prompt string) []string { return []string{"--", prompt} }
 
 // Resume implements Harness: `claude [--remote-control] [args] --resume <id>`.
 func (c Claude) Resume(sessionID string, args []string) []string {

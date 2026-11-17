@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brettmostert/agent-command/internal/daemon"
 	"github.com/brettmostert/agent-command/internal/harness"
 	"github.com/brettmostert/agent-command/internal/paths"
 	"github.com/brettmostert/agent-command/internal/term"
@@ -28,6 +30,15 @@ func TestHostArgv(t *testing.T) {
 	if got, want := hostArgv(h, hostOptions{Resume: "sid", Prompt: "# go", Args: []string{"--model", "opus"}}),
 		[]string{"/c", "--remote-control", "--model", "opus", "--resume", "sid", "--", "# go"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("resume with a prompt = %v", got)
+	}
+	// agy: the prompt joined to -i, on a new or a resumed conversation.
+	a := harness.Antigravity{Path: "/agy"}
+	if got, want := hostArgv(a, hostOptions{Dir: "/w", Name: "n", Prompt: "-p", ClaudeSession: "u", Args: []string{"--mode", "plan"}}),
+		[]string{"/agy", "-i=-p", "--mode", "plan"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("agy new = %v", got)
+	}
+	if got, want := hostArgv(a, hostOptions{Resume: "conv", Prompt: "go"}), []string{"/agy", "--conversation", "conv", "-i=go"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("agy resume = %v", got)
 	}
 	// A shell gets no prompt.
 	if got := hostArgv(harness.Terminal{Shell: "/bin/zsh"}, hostOptions{Resume: "x", Prompt: "p"}); slices.Contains(got, "p") {
@@ -196,5 +207,33 @@ func TestLoginEnvUsesThisLoginsSSHAgent(t *testing.T) {
 	}
 	if !strings.Contains(env, "PATH=/usr/bin") {
 		t.Errorf("the saved PATH should stay:\n%s", env)
+	}
+}
+
+// agy is found on the login shell's PATH; without it, starting a session says so.
+func TestHostHarnessAntigravity(t *testing.T) {
+	dir := t.TempDir()
+	p := paths.Paths{StateDir: filepath.Join(dir, "s"), RuntimeDir: filepath.Join(dir, "r"), ConfigDir: filepath.Join(dir, "c")}
+	bin := filepath.Join(dir, "bin")
+	must(t, os.MkdirAll(bin, 0o700))
+	must(t, os.MkdirAll(p.StateDir, 0o700))
+	t.Setenv("PATH", filepath.Join(dir, "nothing")) // not the real agy
+	must(t, os.WriteFile(p.Env(), []byte(`{"PATH":"`+bin+`","HOME":"`+dir+`"}`), 0o600))
+
+	if _, _, err := hostHarness(p, "antigravity"); !errors.Is(err, errNoAgy) || err.Error() != "Antigravity's CLI (agy) isn't installed" {
+		t.Errorf("without agy: %v", err)
+	}
+	if err := (execHosts{paths: p}).Start(context.Background(), daemon.HostRequest{ID: "x", Harness: "antigravity", Dir: dir}); !errors.Is(err, errNoAgy) {
+		t.Errorf("starting without agy: %v", err)
+	}
+
+	agy := filepath.Join(bin, "agy")
+	must(t, os.WriteFile(agy, []byte("#!/bin/sh\n"), 0o700))
+	h, env, err := hostHarness(p, "antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, ok := h.(harness.Antigravity); !ok || a.Path != agy || !slices.Contains(env, "PATH="+bin) {
+		t.Errorf("harness %+v, env %v", h, env)
 	}
 }

@@ -99,7 +99,7 @@ func (d *Daemon) resume(ctx context.Context, id string) (*core.Session, error) {
 	switch {
 	case s.Status == core.StatusArchived:
 		return nil, errors.New("that session is archived (acmd unarchive first)")
-	case s.ClaudeSessionID == "" && !s.IsTerminal():
+	case s.ClaudeSessionID == "" && !s.IsTerminal() && !s.IsAntigravity(): // such an agy starts afresh
 		return nil, errors.New("that session has no Claude conversation to resume")
 	case s.Kind == core.KindHosted && !s.Stopped():
 		return s, nil // already running

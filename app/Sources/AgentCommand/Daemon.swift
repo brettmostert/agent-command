@@ -204,7 +204,7 @@ struct Session: Decodable, Identifiable, Equatable {
     /// Claude runs in it: a Claude session, or Claude typed in a terminal (with
     /// or without hooks).
     var runsClaude: Bool {
-        !isTerminal || !claudeSessionID.isEmpty || (status == "unknown" && statusDetail == "claude")
+        isClaude || !claudeSessionID.isEmpty || (status == "unknown" && statusDetail == "claude")
     }
 
     /// The row's tooltip: everything about the session on a few lines.
@@ -217,6 +217,13 @@ struct Session: Decodable, Identifiable, Equatable {
     }
 
     var isTerminal: Bool { harness == "terminal" }
+    /// What it was started with, if the app knows it.
+    var harnessKind: Harness? { Harness(session: harness) }
+    /// Started as Claude: what Claude's own features (its session id, resume) need.
+    var isClaude: Bool { harnessKind == .claude }
+    var isAntigravity: Bool { harnessKind == .antigravity }
+    /// "Claude", "Antigravity" or "Terminal"; "Agent" for one the app can't name.
+    var harnessTitle: String { harnessKind?.title ?? "Agent" }
     /// A terminal counts once an agent has started in it.
     var isAgent: Bool { !isTerminal || !claudeSessionID.isEmpty }
     var isArchived: Bool { status == "archived" }

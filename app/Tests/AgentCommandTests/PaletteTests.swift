@@ -12,7 +12,15 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
 
 @Test func paletteWithNothingShowingHasTheAppWideCommands() {
     let entries = Palette.entries(PaletteState())
-    #expect(titles(entries, in: "New") == ["Claude session", "Terminal", "Resume a session…"])
+    #expect(titles(entries, in: "New") == [
+        "Claude session", "Antigravity session", "Terminal", "New session…", "Resume a session…",
+    ])
+    #expect(entry(entries, "New", "Claude session")?.action == .newSession(harness: "claude"))
+    #expect(entry(entries, "New", "Claude session")?.shortcut == "⌘N")
+    #expect(entry(entries, "New", "Antigravity session")?.action == .newSession(harness: "antigravity"))
+    #expect(entry(entries, "New", "Terminal")?.action == .newSession(harness: "terminal"))
+    #expect(entry(entries, "New", "New session…")?.action == .chooseHarness)
+    #expect(entry(entries, "New", "New session…")?.shortcut == "⇧⌘N")
     #expect(titles(entries, in: "Panes") == ["Split right", "Split down", "Close pane"], "no focus commands for one pane")
     #expect(titles(entries, in: "Screen").isEmpty, "no screen commands without a terminal")
     #expect(titles(entries, in: "Go to").isEmpty, "nothing needs you, and no sessions")
@@ -49,6 +57,15 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     #expect(entry(entries, "Terminal session", "Open in editor")?.shortcut == "⇧⌘E")
     let nowhere = try makeSession(id: "n1", cwd: "", harness: "terminal")
     #expect(!titles(Palette.entries(PaletteState(targets: [nowhere])), in: "Terminal session").contains("Open in editor"))
+}
+
+@Test func paletteForAntigravityHasNoClaudeID() throws {
+    let agent = try makeSession(id: "g1", harness: "antigravity")
+    let entries = Palette.entries(PaletteState(targets: [agent], sessions: [agent]))
+    #expect(titles(entries, in: "Antigravity session") == ["Rename…", "Archive…", "Open in editor", "Copy folder path"])
+    let unnamed = try makeSession(id: "x1", harness: "codex")
+    #expect(titles(Palette.entries(PaletteState(targets: [unnamed])), in: "Agent session").first == "Rename…")
+    #expect(Palette.archivePrompt([agent])?.note.hasPrefix("Agents stop.") == true, "it can be unarchived, as Claude can")
 }
 
 @Test func paletteActsOnASelectionTogether() throws {

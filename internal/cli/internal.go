@@ -20,6 +20,7 @@ import (
 
 	"github.com/brettmostert/agent-command/internal/claudecli"
 	"github.com/brettmostert/agent-command/internal/config"
+	"github.com/brettmostert/agent-command/internal/core"
 	"github.com/brettmostert/agent-command/internal/daemon"
 	"github.com/brettmostert/agent-command/internal/hook"
 	"github.com/brettmostert/agent-command/internal/paths"
@@ -144,11 +145,15 @@ func newDaemonRestartCmd() *cobra.Command {
 func newHookCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "hook <Event>",
-		Short:  "Handle a Claude Code hook event (called by Claude Code)",
+		Short:  "Handle a Claude Code or Antigravity hook event (called by the agent)",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
-		// Always succeeds: a hook must never block or break Claude.
+		// Always succeeds: a hook must never block or break the agent.
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if core.IsAntigravityHook(args[0]) {
+				// First, so agy has its answer whatever happens next.
+				fmt.Fprint(cmd.OutOrStdout(), hook.AntigravityReply)
+			}
 			p, err := paths.Default()
 			if err != nil {
 				debugf(cmd, "paths: %v", err)
@@ -206,6 +211,28 @@ func claudeCommand(p paths.Paths) (string, []string, error) {
 		}
 	}
 	return claude, env, nil
+}
+
+// errNoAgy is what starting an Antigravity session says when agy can't be found.
+var errNoAgy = errors.New("Antigravity's CLI (agy) isn't installed") //nolint:staticcheck // ST1005: starts with a name
+
+// agyCommand finds agy the way claudeCommand finds claude: on the login shell's
+// PATH, then on acmd's own.
+func agyCommand(p paths.Paths) (string, []string, error) {
+	env := loginEnv(p)
+	pathList := ""
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+			pathList = v
+		}
+	}
+	agy, err := setup.LookPathIn("agy", pathList)
+	if err != nil {
+		if agy, err = exec.LookPath("agy"); err != nil {
+			return "", nil, errNoAgy
+		}
+	}
+	return agy, env, nil
 }
 
 // agentHelp returns claude's --help, read once and kept for an hour, so job

@@ -394,6 +394,10 @@ func (d *Daemon) ApplyHook(ctx context.Context, ev ipc.HookEvent) error {
 		if !sess.FollowConversation(e) {
 			return nil
 		}
+	case core.IsAntigravityHook(ev.Name):
+		// agy only reports for the session it runs in; a row of its own would
+		// be taken for a Claude conversation.
+		return nil
 	default:
 		sess, err = d.store.SessionByClaudeID(ctx, e.SessionID)
 		isNew = errors.Is(err, store.ErrNotFound)
