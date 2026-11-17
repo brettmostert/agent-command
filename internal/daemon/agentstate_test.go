@@ -93,3 +93,28 @@ func TestAgentStateEvent(t *testing.T) {
 		t.Error("an unknown state made an event")
 	}
 }
+
+// agy's done report carries the reply. Its Stop hook has usually ended the turn
+// already, with no text, yet the reply still becomes the Inbox's done item.
+func TestAntigravityReplyReachesTheInbox(t *testing.T) {
+	p := testPaths(t)
+	fh, fa := &fakeHosts{paths: p}, &fakeAgent{}
+	start(t, p, func(c *Config) { c.Hosts = fh; c.FrontEvery = 20 * time.Millisecond; c.HostAgent = fa.get })
+	c := dial(t, p)
+	s := newSess(t, c, ipc.NewRequest{Cwd: "/w/api", Harness: core.HarnessAntigravity})
+	in := ipc.HookContext{HostSession: s.ID}
+	t0 := time.Now()
+	must(t, c.Call(ipc.OpEvent, hookEvent("antigravity:PreInvocation", `{"conversationId":"c1","lastUserInput":"say ping"}`, t0, in), nil))
+	must(t, c.Call(ipc.OpEvent, hookEvent("antigravity:Stop", `{"conversationId":"c1","terminationReason":"NO_TOOL_CALL"}`, t0.Add(time.Millisecond), in), nil))
+	waitFor(t, "done from the hook", func() bool { return sessionByID(t, c, s.ID).Status == core.StatusDone })
+
+	fa.report("done", "", "ping")
+	waitFor(t, "the reply in the Inbox", func() bool {
+		for _, it := range snapshot(t, c).Inbox {
+			if it.SessionID == s.ID && it.Kind == core.InboxDone && it.Text == "ping" {
+				return true
+			}
+		}
+		return false
+	})
+}

@@ -30,8 +30,11 @@ type AgentState struct {
 const (
 	oscAgentPrefix = "\x1b]7501;"
 	// maxOSCAgent bounds a sequence the scanner keeps waiting for: past it, the
-	// bytes aren't a report.
-	maxOSCAgent = 8 << 10
+	// bytes aren't a report. A done report carries agy's whole reply, base64.
+	maxOSCAgent = 128 << 10
+	// maxAgentMsg is the most of a report's message kept, as for Claude's last
+	// message.
+	maxAgentMsg = 64 << 10
 )
 
 // oscAgentScanner finds OSC 7501 reports in a program's output. A report can be
@@ -113,7 +116,7 @@ func parseAgentState(body string) (AgentState, bool) {
 			st.App = val
 		case "msg":
 			if b, err := base64.StdEncoding.DecodeString(val); err == nil {
-				st.Msg = clip(string(b), 512)
+				st.Msg = clip(string(b), maxAgentMsg)
 			}
 		}
 	}

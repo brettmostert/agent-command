@@ -53,7 +53,11 @@ func (d *Daemon) agentStateOnce(ctx context.Context) (bool, error) {
 			return changed, err
 		}
 		tr := core.Apply(s, e)
-		if !tr.Changed() {
+		// agy's Stop hook usually ends the turn first, with no text; its done report
+		// then changes no status, but it brings the reply, so it still makes the
+		// Inbox's done item.
+		reply := e.Kind == core.HookStop && e.LastMessage != "" && tr.Applied
+		if !tr.Changed() && !reply {
 			continue
 		}
 		err = d.store.WithTx(ctx, func(tx *store.Store) error {
@@ -77,7 +81,8 @@ func (d *Daemon) agentStateOnce(ctx context.Context) (bool, error) {
 
 // agentStateEvent is the event an OSC 7501 report stands for, in the words the
 // state machine already knows: working is busy, blocked is waiting on you (its
-// message says what for), done and idle end the turn, failed is an error.
+// message says what for), done and idle end the turn (done's message is agy's
+// reply), failed is an error.
 func agentStateEvent(st term.AgentState) (core.Event, bool) {
 	e := core.Event{Time: st.At, Agent: "Antigravity"}
 	switch st.State {
@@ -87,7 +92,7 @@ func agentStateEvent(st term.AgentState) (core.Event, bool) {
 		e.Kind, e.NotificationType = core.HookNotification, "agent_needs_input"
 		e.Message = cmp.Or(st.Msg, blockedWhat(st.Kind))
 	case "done", "idle":
-		e.Kind = core.HookStop
+		e.Kind, e.LastMessage = core.HookStop, st.Msg // done carries agy's reply
 	case "failed":
 		e.Kind, e.Error = core.HookStopFailure, cmp.Or(st.Msg, "an error")
 	default:

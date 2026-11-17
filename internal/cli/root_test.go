@@ -117,3 +117,10 @@ func TestOpenArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestNewRejectsAnUnknownHarness(t *testing.T) {
+	_, err := run(t, "acmd", "new", "--harness", "copilot")
+	if err == nil || !strings.Contains(err.Error(), "claude, antigravity or terminal") {
+		t.Errorf("new --harness copilot: %v", err)
+	}
+}

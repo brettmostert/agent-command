@@ -32,16 +32,23 @@ type newOptions struct {
 	name        string
 	description string
 	prompt      string
+	harness     string
 }
 
 func newNewCmd() *cobra.Command {
 	var o newOptions
 	cmd := &cobra.Command{
 		Use:   "new [-- <first prompt>]",
-		Short: "Start a new Claude session hosted by acmd",
+		Short: "Start a new session hosted by acmd (Claude, unless --harness says otherwise)",
 		Long: "Starts an interactive `claude` in a folder (default: this one), hosted by acmd, and lists it in the app.\n" +
-			"A folder Claude hasn't trusted yet shows Claude's trust prompt in the session.",
+			"A folder Claude hasn't trusted yet shows Claude's trust prompt in the session.\n" +
+			"--harness antigravity starts Antigravity's CLI (agy) instead, and --harness terminal a shell.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			switch o.harness {
+			case "", core.HarnessClaude, core.HarnessAntigravity, core.HarnessTerminal:
+			default:
+				return fmt.Errorf("--harness is claude, antigravity or terminal, not %q", o.harness)
+			}
 			o.prompt = strings.TrimSpace(strings.Join(args, " "))
 			if o.cwd == "" {
 				o.cwd, _ = os.Getwd()
@@ -60,6 +67,7 @@ func newNewCmd() *cobra.Command {
 	f.StringVar(&o.cwd, "cwd", "", "folder to start in (default: the current folder)")
 	f.StringVar(&o.name, "name", "", "session name (default: Claude's)")
 	f.StringVar(&o.description, "description", "", "session description")
+	f.StringVar(&o.harness, "harness", core.HarnessClaude, "what runs in it: claude, antigravity or terminal")
 	return cmd
 }
 
@@ -81,7 +89,10 @@ func startSession(ctx context.Context, o newOptions) (*core.Session, error) {
 	}
 	var s core.Session
 	err = withClient(ctx, func(c *client, snap ipc.Snapshot) error {
-		req := ipc.NewRequest{Cwd: dir, Name: o.name, Description: o.description, Args: cfg.ClaudeArgs, Prompt: o.prompt}
+		req := ipc.NewRequest{Cwd: dir, Name: o.name, Description: o.description, Prompt: o.prompt, Harness: o.harness}
+		if o.harness == "" || o.harness == core.HarnessClaude {
+			req.Args = cfg.ClaudeArgs // claude_args are Claude's flags
+		}
 		if o.group != "" {
 			g, err := resolveGroup(snap, o.group)
 			if err != nil && o.noCreate {
