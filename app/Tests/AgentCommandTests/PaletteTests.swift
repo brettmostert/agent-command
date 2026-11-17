@@ -32,6 +32,16 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     #expect(Set(ids).count == ids.count, "every entry has its own id")
 }
 
+@Test func antigravitySessionsCopyTheirConversationID() throws {
+    let hooked = try makeSession(id: "g1", name: "grav", harness: "antigravity", claude: "conv-9")
+    let entries = Palette.entries(PaletteState(targets: [hooked], sessions: [hooked], setMembers: []))
+    #expect(entry(entries, "Antigravity session", "Copy Antigravity conversation ID")?.action == .copy("conv-9"))
+    #expect(entry(entries, "Antigravity session", "Copy Claude session ID") == nil)
+    let fresh = try makeSession(id: "g2", name: "new", harness: "antigravity")
+    let before = Palette.entries(PaletteState(targets: [fresh], sessions: [fresh], setMembers: []))
+    #expect(entry(before, "Antigravity session", "Copy Antigravity conversation ID") == nil, "no id before its first hook")
+}
+
 @Test func paletteActsOnTheOneSessionShowing() throws {
     let claude = try makeSession(id: "c1", name: "api", cwd: "/w/api", claude: "abc-123")
     let other = try makeSession(id: "t1", name: "shell", harness: "terminal", status: "running")

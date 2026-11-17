@@ -107,6 +107,9 @@ enum Palette {
             list.append(PaletteEntry(section: section, title: "Copy folder path", action: .copy(session.cwd)))
             if session.isClaude {
                 list.append(PaletteEntry(section: section, title: "Copy Claude session ID", action: .copy(session.claudeSessionID)))
+            } else if session.isAntigravity, !session.claudeSessionID.isEmpty {
+                // Its id comes with its first hook.
+                list.append(PaletteEntry(section: section, title: "Copy Antigravity conversation ID", action: .copy(session.claudeSessionID)))
             }
         }
         if state.needsYou {

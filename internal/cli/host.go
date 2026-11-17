@@ -153,6 +153,12 @@ func newHostServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// claude_args or agy_args come first, then the session's own: so every
+			// session acmd starts or resumes gets them, from the app, the CLI or a
+			// job, read when it starts.
+			if cfg, err := config.Load(p.Config()); err == nil {
+				o.Args = append(newSessionArgs(cfg, o.Harness), o.Args...)
+			}
 			if st, err := os.Stat(o.Dir); err != nil || !st.IsDir() {
 				return fmt.Errorf("folder %s is gone", o.Dir)
 			}
@@ -180,7 +186,7 @@ func newHostServeCmd() *cobra.Command {
 	f.StringVar(&o.Name, "name", "", "the session's name")
 	f.StringVar(&o.Prompt, "prompt", "", "the first prompt")
 	f.StringVar(&o.ClaudeSession, "claude-session", "", "the Claude session id to start with (a UUID)")
-	f.StringVar(&o.Resume, "resume", "", "continue this Claude session instead of starting a new one")
+	f.StringVar(&o.Resume, "resume", "", "continue this conversation (Claude's session id, or agy's conversation id) instead of starting a new one")
 	return cmd
 }
 
@@ -189,8 +195,14 @@ type execHosts struct{ paths paths.Paths }
 
 // Start implements daemon.Hosts.
 func (h execHosts) Start(_ context.Context, r daemon.HostRequest) error {
-	if r.Harness == core.HarnessAntigravity {
-		// Here, not in the host: its errors only reach the daemon's log.
+	// The agent is checked here, not in the host: its errors only reach the
+	// daemon's log.
+	switch r.Harness {
+	case "", core.HarnessClaude:
+		if _, _, err := claudeCommand(h.paths); err != nil {
+			return fmt.Errorf("claude not found: %w", err)
+		}
+	case core.HarnessAntigravity:
 		if _, _, err := agyCommand(h.paths); err != nil {
 			return err
 		}

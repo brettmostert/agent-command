@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brettmostert/agent-command/internal/config"
 	"github.com/brettmostert/agent-command/internal/term"
 	"github.com/brettmostert/agent-command/internal/version"
 )
@@ -122,5 +123,14 @@ func TestNewRejectsAnUnknownHarness(t *testing.T) {
 	_, err := run(t, "acmd", "new", "--harness", "copilot")
 	if err == nil || !strings.Contains(err.Error(), "claude, antigravity or terminal") {
 		t.Errorf("new --harness copilot: %v", err)
+	}
+}
+
+func TestNewSessionArgs(t *testing.T) {
+	cfg := config.Config{ClaudeArgs: []string{"--model", "opus"}, AgyArgs: []string{"--mode", "plan"}}
+	for h, want := range map[string]string{"": "--model opus", "claude": "--model opus", "antigravity": "--mode plan", "terminal": ""} {
+		if got := strings.Join(newSessionArgs(cfg, h), " "); got != want {
+			t.Errorf("%q: %q, want %q", h, got, want)
+		}
 	}
 }

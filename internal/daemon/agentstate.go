@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"maps"
 
 	"github.com/brettmostert/agent-command/internal/core"
 	"github.com/brettmostert/agent-command/internal/store"
@@ -12,20 +13,27 @@ import (
 
 // agentStateOnce applies what running Antigravity sessions last reported over
 // OSC 7501 (the host reads it from agy's output). agy has no hook for waiting
-// on you, a permission prompt or a question, but it reports one there. The hosts
-// are asked without d.mu held. It reports whether anything changed.
+// on you, a permission prompt or a question, but it reports one there; its
+// screen then shows the answers, which make the Inbox item's options. The
+// hosts are asked without d.mu held. It reports whether anything changed.
 func (d *Daemon) agentStateOnce(ctx context.Context) (bool, error) {
 	d.mu.Lock()
 	sessions, err := d.store.Sessions(ctx, false)
+	seen := maps.Clone(d.agentSeen)
 	d.mu.Unlock()
 	if err != nil {
 		return false, err
 	}
-	reports := map[string]term.AgentState{}
+	reports, screens := map[string]term.AgentState{}, map[string]string{}
 	for _, s := range sessions {
 		if s.IsAntigravity() && s.Kind == core.KindHosted && !s.Stopped() && s.Status != core.StatusArchived {
 			if st, ok := d.cfg.HostAgent(s.ID); ok && st.Seq > 0 {
 				reports[s.ID] = st
+				if st.Seq != seen[s.ID] && st.State == "blocked" && d.cfg.HostScreen != nil {
+					if text, ok := d.cfg.HostScreen(s.ID); ok {
+						screens[s.ID] = text
+					}
+				}
 			}
 		}
 	}
@@ -57,12 +65,22 @@ func (d *Daemon) agentStateOnce(ctx context.Context) (bool, error) {
 		// then changes no status, but it brings the reply, so it still makes the
 		// Inbox's done item.
 		reply := e.Kind == core.HookStop && e.LastMessage != "" && tr.Applied
-		if !tr.Changed() && !reply {
+		// A block is a new prompt even when the session was waiting already.
+		var ask *core.InboxItem
+		if e.Kind == core.HookNotification && tr.Applied {
+			ask = core.AntigravityAsk(s, e, st.Kind, screens[id])
+		}
+		if !tr.Changed() && !reply && ask == nil {
 			continue
 		}
 		err = d.store.WithTx(ctx, func(tx *store.Store) error {
 			if err := applyInbox(ctx, tx, s, e); err != nil {
 				return err
+			}
+			if ask != nil {
+				if err := tx.AddInboxItem(ctx, *ask); err != nil {
+					return err
+				}
 			}
 			if err := tx.UpdateSession(ctx, s); err != nil {
 				return err

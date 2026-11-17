@@ -183,24 +183,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         #endif
     }
 
-    /// Offers to add the Claude Code hooks that live status needs, if they're missing.
+    /// Offers to add the hooks that live status needs (Claude Code's, and agy's once
+    /// it's installed), if they're missing.
     private func offerSetup() {
-        guard !DaemonPaths.hooksInstalled else {
+        let need = DaemonPaths.setupNeed
+        switch need {
+        case .none: return
+        case .refresh:
             // The hooks were accepted before, and the app has since moved.
-            if !DaemonPaths.hooksCurrent { _ = runInit() }
+            _ = runInit()
             return
+        case .offer: break
         }
         let alert = NSAlert()
         alert.messageText = "Set up Agent Command?"
-        alert.informativeText = """
-            This adds hook entries to your Claude Code settings, so sessions can show when they're busy, waiting \
-            or done. It backs the file up first, and keeps your other settings. It also saves your login shell's \
-            environment for the sessions it starts.
-            """
+        alert.informativeText = need.offerText
         // Opt-in: it adds a sudoers rule, so macOS asks for the password too.
         let wake = NSButton(checkboxWithTitle: "Also let scheduled jobs wake the Mac (asks for your password)", target: nil, action: nil)
         wake.state = .off
-        alert.accessoryView = wake
+        if need.isFirstSetup { alert.accessoryView = wake }
         alert.addButton(withTitle: "Set Up")
         alert.addButton(withTitle: "Not Now")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -454,32 +455,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         store.newSession(harness: harness.rawValue, in: url.path)
     }
 
-    /// A popup to pick an earlier Claude session, or enter its id.
+    /// A popup to pick an earlier Claude or Antigravity conversation, or enter its id.
     @objc private func resumeSession() {
         closePopup()
         showPopup(ResumeView(
             store: store,
             close: { [weak self] in self?.closePopup() },
-            choose: { [weak self] id, isRunning in
+            choose: { [weak self] target in
                 self?.closePopup()
-                DispatchQueue.main.async { self?.resume(id, isRunning: isRunning) }
+                DispatchQueue.main.async { self?.resume(target) }
             }
         ))
     }
 
-    private func resume(_ id: String, isRunning: Bool) {
-        if isRunning {
+    private func resume(_ target: ResumeTarget) {
+        if target.isRunning {
             let alert = NSAlert()
             alert.messageText = "This session looks like it's still running"
             alert.informativeText = """
-                Claude reports it as live, possibly in another terminal. Resuming puts a \
+                \(target.harness.title) reports it as live, possibly in another terminal. Resuming puts a \
                 second process on the same conversation. Exit the other one first if you can.
                 """
             alert.addButton(withTitle: "Cancel")
             alert.addButton(withTitle: "Resume Anyway")
             guard alert.runModal() == .alertSecondButtonReturn else { return }
         }
-        store.resumeConversation(id)
+        store.resumeConversation(target.id, harness: target.harness)
     }
 
     /// Shows or hides the command popup.

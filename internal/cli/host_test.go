@@ -237,3 +237,43 @@ func TestHostHarnessAntigravity(t *testing.T) {
 		t.Errorf("harness %+v, env %v", h, env)
 	}
 }
+
+// agy_command picks agy, as claude_command picks claude, and a job's settings
+// are checked against each agent's own --help (agy's is on stderr).
+func TestAgyCommandAndAgentHelp(t *testing.T) {
+	dir := t.TempDir()
+	p := paths.Paths{StateDir: filepath.Join(dir, "s"), RuntimeDir: filepath.Join(dir, "r"), ConfigDir: filepath.Join(dir, "c")}
+	for _, d := range []string{p.StateDir, p.ConfigDir} {
+		must(t, os.MkdirAll(d, 0o700))
+	}
+	t.Setenv("PATH", filepath.Join(dir, "nothing"))
+	must(t, os.WriteFile(p.Env(), []byte(`{"PATH":"`+filepath.Join(dir, "nothing")+`"}`), 0o600))
+	agy := filepath.Join(dir, "my-agy")
+	claude := filepath.Join(dir, "my-claude")
+	must(t, os.WriteFile(agy, []byte("#!/bin/sh\necho '  --mode   Set the agent execution mode' >&2\n"), 0o700))
+	must(t, os.WriteFile(claude, []byte("#!/bin/sh\necho '  --permission-mode <mode>'\n"), 0o700))
+	must(t, os.WriteFile(p.Config(), []byte("claude_command = \""+claude+"\"\nagy_command = \""+agy+"\"\n"), 0o600))
+
+	if got, _, err := agyCommand(p); err != nil || got != agy {
+		t.Errorf("agyCommand = %q, %v", got, err)
+	}
+	help := agentHelp(p)
+	if got := help("antigravity"); !strings.Contains(got, "--mode") || strings.Contains(got, "--permission-mode") {
+		t.Errorf("agy's help: %q", got)
+	}
+	if got := help("claude"); !strings.Contains(got, "--permission-mode") {
+		t.Errorf("claude's help: %q", got)
+	}
+
+	must(t, os.WriteFile(p.Config(), []byte("claude_command = \"no-such-claude\"\nagy_command = \"no-such-agy\"\n"), 0o600))
+	if _, _, err := agyCommand(p); !errors.Is(err, errNoAgy) {
+		t.Errorf("a missing agy_command: %v", err)
+	}
+	if got := agentHelp(p)("antigravity"); got != "" {
+		t.Errorf("help without agy: %q", got)
+	}
+	if err := (execHosts{paths: p}).Start(context.Background(), daemon.HostRequest{ID: "x", Dir: dir}); err == nil ||
+		!strings.Contains(err.Error(), "claude not found") {
+		t.Errorf("starting without claude: %v", err)
+	}
+}

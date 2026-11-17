@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import AgentCommand
@@ -11,6 +12,55 @@ import Testing
     #expect(Harness.antigravity.panelPrompt == "Start Session" && Harness.claude.panelPrompt == "Start Session")
     #expect(Harness(session: "") == .claude && Harness(session: "antigravity") == .antigravity)
     #expect(Harness(session: "codex") == nil)
+    #expect(Harness.agents == [.claude, .antigravity])
+    #expect(Harness.claude.productName == "Claude Code" && Harness.antigravity.productName == "Antigravity")
+    #expect(Harness.claude.conversationTitle == "Claude session")
+    #expect(Harness.antigravity.conversationTitle == "Antigravity conversation")
+}
+
+private func conversation(_ id: String, _ title: String, harness: String? = nil, running: Bool = false) throws -> Conversation {
+    var fields: [String: Any] = ["id": id, "cwd": "/w", "title": title, "updated_at": "2026-11-07T10:00:00Z", "running": running]
+    if let harness { fields["harness"] = harness }
+    return try JSONDecoder().decode(Conversation.self, from: JSONSerialization.data(withJSONObject: fields))
+}
+
+@Test func theResumePickerListsBothAgents() throws {
+    let claude = try conversation("aaaa1111", "Fix the parser", running: true)
+    let gravity = try conversation("bbbb2222", "Plan the release", harness: "antigravity")
+    var choice = ResumeChoice([claude, gravity])
+    #expect(choice.rows == [.conversation(claude), .conversation(gravity)])
+    #expect(choice.chosen?.target == ResumeTarget(id: "aaaa1111", harness: .claude, isRunning: true))
+    choice.move(1)
+    #expect(choice.chosen?.target == ResumeTarget(id: "bbbb2222", harness: .antigravity), "resumed as Antigravity's")
+    choice.move(1)
+    #expect(choice.chosen == .conversation(claude), "it wraps around")
+    choice.select(.conversation(gravity))
+    #expect(choice.chosen == .conversation(gravity))
+    #expect(Set(choice.rows.map(\.id)).count == 2)
+
+    choice.setSearch("release")
+    #expect(choice.rows == [.conversation(gravity)] && choice.typedID == nil)
+    choice.setSearch("Antigravity")
+    #expect(choice.rows == [.conversation(gravity)], "the agent's name finds its conversations")
+}
+
+@Test func aTypedIDAsksWhoseItIs() throws {
+    var choice = ResumeChoice([try conversation("aaaa1111", "Fix the parser")])
+    choice.setSearch("aaaa")
+    #expect(choice.typedID == nil, "it's listed")
+    choice.setSearch(" 0123ABCD-ef ")
+    #expect(choice.typedID == "0123abcd-ef")
+    #expect(choice.rows == [.typed("0123abcd-ef", .claude), .typed("0123abcd-ef", .antigravity)])
+    #expect(choice.chosen?.target == ResumeTarget(id: "0123abcd-ef", harness: .claude), "Claude's first")
+    choice.move(1)
+    #expect(choice.chosen?.target == ResumeTarget(id: "0123abcd-ef", harness: .antigravity))
+    #expect(choice.rows.map(\.id) == ["typed:claude:0123abcd-ef", "typed:antigravity:0123abcd-ef"])
+    choice.setSearch("0123abcd-ee")
+    #expect(choice.chosen == .typed("0123abcd-ee", .claude), "a new search starts at the top")
+    choice.setSearch("0123")
+    #expect(choice.typedID == nil && choice.rows.isEmpty && choice.chosen == nil, "too short for an id")
+    choice.move(1)
+    #expect(choice.chosen == nil)
 }
 
 @Test func thePickerMovesAndPicks() {

@@ -118,3 +118,144 @@ func TestAntigravityReplyReachesTheInbox(t *testing.T) {
 		return false
 	})
 }
+
+// agy waiting on a permission makes an Inbox item with the answers its screen
+// shows; picking one types its number, as agy takes it, and agy working again
+// closes the item.
+func TestAntigravityPermissionInTheInbox(t *testing.T) {
+	p := testPaths(t)
+	fh, fa, typed := &fakeHosts{paths: p}, &fakeAgent{}, &sent{}
+	var mu sync.Mutex
+	screen, asked := "", 0
+	start(t, p, func(c *Config) {
+		c.Hosts, c.FrontEvery, c.HostAgent, c.SendToHost = fh, 20*time.Millisecond, fa.get, typed.send
+		c.HostScreen = func(string) (string, bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked++
+			return screen, true
+		}
+	})
+	c := dial(t, p)
+	s := newSess(t, c, ipc.NewRequest{Cwd: "/w/api", Harness: core.HarnessAntigravity})
+	in := ipc.HookContext{HostSession: s.ID}
+	mu.Lock()
+	screen = agyPermissionScreen
+	mu.Unlock()
+	permission := func() core.InboxItem {
+		t.Helper()
+		fa.report("blocked", "permission", "Approve Bash: ls -la notes2.txt")
+		var item core.InboxItem
+		waitFor(t, "the permission in the Inbox", func() bool {
+			for _, it := range snapshot(t, c).Inbox {
+				if it.SessionID == s.ID && it.Kind == core.InboxPermission {
+					item = it
+					return true
+				}
+			}
+			return false
+		})
+		return item
+	}
+
+	// Before agy's first hook acmd doesn't know its conversation yet, but agy
+	// runs there, so the answer is typed.
+	item := permission()
+	must(t, c.Call(ipc.OpInboxAnswer, ipc.InboxAnswer{ID: item.ID, Option: 1}, nil))
+	if typed.all() != "1" {
+		t.Errorf("before the first hook, typed %q", typed.all())
+	}
+	typed.keys = nil
+	must(t, c.Call(ipc.OpEvent, hookEvent("antigravity:PreInvocation", `{"conversationId":"c1","lastUserInput":"ls"}`, time.Now(), in), nil))
+	waitFor(t, "the hook closes it", func() bool { return len(snapshot(t, c).Inbox) == 0 })
+
+	item = permission()
+	if item.Text != "Approve Bash: ls -la notes2.txt" || len(item.Options) != 4 || item.Options[3] != "No, cancel" {
+		t.Errorf("item: %+v", item)
+	}
+	time.Sleep(100 * time.Millisecond) // more ticks: a report reads the screen once
+	mu.Lock()
+	if asked != 2 {
+		t.Errorf("screen read %d times", asked)
+	}
+	mu.Unlock()
+
+	must(t, c.Call(ipc.OpInboxAnswer, ipc.InboxAnswer{ID: item.ID, Option: 1}, nil))
+	if typed.all() != "1" {
+		t.Errorf("typed %q", typed.all())
+	}
+
+	// Answered in agy itself instead: working closes the next item.
+	fa.report("blocked", "question", "Which file?")
+	waitFor(t, "the question", func() bool {
+		q := snapshot(t, c).Inbox
+		return len(q) == 1 && q[0].Kind == core.InboxQuestion && q[0].Text == "Which file?"
+	})
+	fa.report("working", "", "")
+	waitFor(t, "closed once agy works", func() bool { return len(snapshot(t, c).Inbox) == 0 })
+
+	// A sign in is answered in the session: waiting, but no item.
+	fa.report("blocked", "auth", "Sign in")
+	waitFor(t, "waiting", func() bool { return sessionByID(t, c, s.ID).Status == core.StatusWaiting })
+	if q := snapshot(t, c).Inbox; len(q) != 0 {
+		t.Errorf("sign in made an item: %+v", q)
+	}
+}
+
+// agyPermissionScreen is the bottom of a real agy 1.5.10 screen at a permission
+// prompt (core's tests have it with more context).
+const agyPermissionScreen = `Requesting permission for:
+   ls -la notes2.txt
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with
+'ls'
+  3. Yes, and always allow for commands that start with 'ls' (Persist to
+settings.json)
+  4. No, cancel
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                     plan · Gemini 3.8 Flash · high
+`
+
+// A permission prompt agy reports becomes an Inbox item with the choices on its
+// screen, and answering one types its number. It works before agy's first hook,
+// when the session has no conversation id yet.
+func TestAntigravityPermissionAnsweredFromTheInbox(t *testing.T) {
+	p := testPaths(t)
+	typed := &sent{}
+	fa := &fakeAgent{}
+	start(t, p, func(c *Config) {
+		c.Hosts = &fakeHosts{paths: p}
+		c.SendToHost = typed.send
+		c.FrontEvery = 20 * time.Millisecond
+		c.HostAgent = fa.get
+		c.HostScreen = func(string) (string, bool) { return agyPermissionScreen, true }
+	})
+	c := dial(t, p)
+	s := newSess(t, c, ipc.NewRequest{Cwd: "/w/api", Harness: core.HarnessAntigravity})
+
+	fa.report("blocked", "permission", "Approve Bash: ls -la notes2.txt")
+	var item core.InboxItem
+	waitFor(t, "the permission in the Inbox", func() bool {
+		for _, it := range snapshot(t, c).Inbox {
+			if it.SessionID == s.ID && it.Kind == core.InboxPermission {
+				item = it
+				return true
+			}
+		}
+		return false
+	})
+	if item.Text != "Approve Bash: ls -la notes2.txt" || len(item.Options) != 4 || item.Options[3] != "No, cancel" {
+		t.Fatalf("item = %q %q", item.Text, item.Options)
+	}
+	if got := item.Options[1]; got != "Yes, and always allow in this conversation for commands that start with 'ls'" {
+		t.Errorf("a wrapped option = %q", got)
+	}
+	if sessionByID(t, c, s.ID).ClaudeSessionID != "" {
+		t.Fatal("the test needs a session without a conversation id")
+	}
+	must(t, c.Call(ipc.OpInboxAnswer, ipc.InboxAnswer{ID: item.ID, Option: 1}, nil))
+	if typed.all() != "1" {
+		t.Errorf("typed %q, want the option's number", typed.all())
+	}
+}

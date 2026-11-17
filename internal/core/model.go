@@ -60,6 +60,24 @@ const (
 	HarnessAntigravity = "antigravity"
 )
 
+// AgentName is how messages name the agent a harness runs: "Claude" (also
+// for a terminal, whose agent is usually Claude) or "Antigravity".
+func AgentName(harness string) string {
+	if harness == HarnessAntigravity {
+		return antigravityAgent
+	}
+	return "Claude"
+}
+
+// AgentApp is how messages name the program a harness runs, as in "the
+// installed Claude Code".
+func AgentApp(harness string) string {
+	if harness == HarnessAntigravity {
+		return "Antigravity CLI"
+	}
+	return "Claude Code"
+}
+
 // NameSource says whether a session's name may still be replaced automatically.
 type NameSource string
 

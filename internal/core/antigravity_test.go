@@ -1,6 +1,7 @@
 package core
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -119,5 +120,82 @@ func TestAntigravityLifecycle(t *testing.T) {
 	it, _ = InboxEffect(s, Event{Kind: HookStopFailure, Error: "rate_limit"})
 	if it == nil || !strings.HasPrefix(it.Text, "Claude stopped with rate_limit") {
 		t.Errorf("claude inbox: %+v", it)
+	}
+}
+
+// agyPermissionScreen is the bottom of a real agy 1.5.10 screen at a
+// permission prompt (from the host's ScreenText), with what came before it and
+// the blank rows below.
+const agyPermissionScreen = `> Run exactly this shell command and tell me what it prints: ls -la notes2.txt
+
+  I'll run that for you.
+
+Requesting permission for:
+   ls -la notes2.txt
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with
+'ls'
+  3. Yes, and always allow for commands that start with 'ls' (Persist to
+settings.json)
+  4. No, cancel
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                     plan · Gemini 3.8 Flash · high
+
+
+`
+
+func TestAntigravityOptions(t *testing.T) {
+	want := []string{
+		"Yes, run command",
+		"Yes, and always allow in this conversation for commands that start with 'ls'",
+		"Yes, and always allow for commands that start with 'ls' (Persist to settings.json)",
+		"No, cancel",
+	}
+	if got := AntigravityOptions(agyPermissionScreen); !slices.Equal(got, want) {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+	if got := AntigravityOptions(strings.ReplaceAll(agyPermissionScreen, "\n", "\r\n")); !slices.Equal(got, want) {
+		t.Errorf("CRLF: %q", got)
+	}
+
+	for name, screen := range map[string]string{
+		// Unnumbered: arrows and Enter. No options; the item shows the message.
+		"trust": "Do you trust the files in this folder?\n> Yes, I trust this folder\n  No, exit\n",
+		// An earlier list, with agy's work since below it, isn't the prompt in front.
+		"old list": agyPermissionScreen + "  ran ls\n  -rw-r--r-- notes2.txt\n  Done.\n\n> next prompt\n  more\n",
+		"one":      "Pick:\n> 1. Only\n  ↑/↓ Navigate\n",
+		"order":    "Pick:\n> 1. A\n  3. C\n",
+		"nothing":  "",
+		"no 1":     "  2. B\n  3. C\n",
+	} {
+		if got := AntigravityOptions(screen); got != nil {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+	// A question: the list ends at a blank line, with the hints below.
+	q := "Which database?\n\n  1. Postgres\n› 2. SQLite\n\nEnter to select · Esc to cancel\n"
+	if got := AntigravityOptions(q); !slices.Equal(got, []string{"Postgres", "SQLite"}) {
+		t.Errorf("question: %q", got)
+	}
+}
+
+func TestAntigravityAsk(t *testing.T) {
+	s := &Session{ID: "s1"}
+	e := Event{Kind: HookNotification, Message: "Approve Bash: ls -la notes2.txt", Time: at(1)}
+	it := AntigravityAsk(s, e, "permission", agyPermissionScreen)
+	if it == nil || it.Kind != InboxPermission || it.Text != e.Message || len(it.Options) != 4 || it.SessionID != "s1" || !it.At.Equal(at(1)) {
+		t.Fatalf("permission: %+v", it)
+	}
+	for kind, want := range map[string]string{"question": InboxQuestion, "plan": InboxQuestion} {
+		if it := AntigravityAsk(s, e, kind, ""); it == nil || it.Kind != want || it.Options != nil {
+			t.Errorf("%s: %+v", kind, it)
+		}
+	}
+	if it := AntigravityAsk(s, e, "auth", agyPermissionScreen); it != nil {
+		t.Errorf("sign in: %+v", it)
+	}
+	if it := AntigravityAsk(s, Event{Message: "x"}, "permission", ""); it == nil || it.At.IsZero() {
+		t.Errorf("no time: %+v", it)
 	}
 }

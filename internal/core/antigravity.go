@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -94,4 +96,95 @@ func parseAntigravityHook(event string, raw []byte, at time.Time) (Event, error)
 		e.Kind = EventKind(AntigravityHookPrefix + clean(event, 64))
 	}
 	return e, nil
+}
+
+// AntigravityAsk is the Inbox item for agy waiting on you, from its blocked
+// report (e, of kind permission, question or plan) and its screen at the
+// time: the report's message, and the numbered answers the screen shows, which
+// are answered by typing the number. Other kinds (a sign in) and a prompt with
+// unnumbered answers (the folder trust prompt) are answered in the session, so
+// they make no item, or one without options.
+func AntigravityAsk(s *Session, e Event, kind, screen string) *InboxItem {
+	var item string
+	switch kind {
+	case "permission":
+		item = InboxPermission
+	case "question", "plan":
+		item = InboxQuestion
+	default:
+		return nil
+	}
+	at := e.Time
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return &InboxItem{SessionID: s.ID, Kind: item, Text: e.Message, Options: AntigravityOptions(screen), At: at}
+}
+
+// agyOption is a line that starts an answer: "  2. Yes, and…", or "> 1. Yes"
+// for the one selected.
+var agyOption = regexp.MustCompile(`^\s*(?:[>❯›]\s*)?(\d{1,2})\.\s+(\S.*)$`)
+
+const (
+	// agyPromptLines is how far up from the bottom the answers can start.
+	agyPromptLines = 40
+	// agyFooterLines is how many lines of hints can follow them.
+	agyFooterLines = 4
+)
+
+// AntigravityOptions reads the numbered answers of the prompt at the bottom of
+// agy's screen, in order, without their numbers. agy wraps a long answer onto
+// lines of its own without a number; they're joined back. The list ends at a
+// blank line or agy's key hints ("↑/↓ Navigate · …", "esc to cancel"). nil
+// when the bottom of the screen has no such list.
+func AntigravityOptions(screen string) []string {
+	lines := strings.Split(strings.ReplaceAll(screen, "\r", ""), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	first := -1
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-agyPromptLines; i-- {
+		if m := agyOption.FindStringSubmatch(lines[i]); m != nil && m[1] == "1" {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return nil
+	}
+	var opts []string
+	i := first
+	for ; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || agyHint(line) {
+			break
+		}
+		if m := agyOption.FindStringSubmatch(lines[i]); m != nil {
+			if m[1] != strconv.Itoa(len(opts)+1) {
+				return nil // out of order: not a list of answers
+			}
+			opts = append(opts, strings.TrimSpace(m[2]))
+			continue
+		}
+		opts[len(opts)-1] += " " + line
+	}
+	// Below the answers there are only hints: more, and the list is something
+	// earlier on the screen, not the prompt in front.
+	rest := 0
+	for ; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "" {
+			rest++
+		}
+	}
+	if rest > agyFooterLines || len(opts) < 2 {
+		return nil
+	}
+	return opts
+}
+
+// agyHint says whether a line is one of agy's key hints, which end a list.
+func agyHint(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.ContainsAny(line, "↑↓") || strings.Contains(line, " · ") ||
+		strings.HasPrefix(lower, "esc ") || strings.HasPrefix(lower, "enter ") || strings.HasPrefix(lower, "tab ")
 }

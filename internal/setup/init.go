@@ -194,6 +194,9 @@ func planConfig(p *Plan, in Input) error {
 	if in.ClaudePath != "" {
 		set("", "claude_command", in.ClaudePath)
 	}
+	if in.AgyPath != "" {
+		set("", "agy_command", in.AgyPath)
+	}
 	if e := in.Editor; e != nil {
 		set("editor", "preset", e.Preset)
 		set("editor", "command", e.Command)

@@ -518,7 +518,11 @@ final class InboxModel {
         let found = store.session(id: item.sessionID)
         // The agent's own name, or Claude's for a terminal it was typed in.
         let agent = found?.isAntigravity == true ? Harness.antigravity.title : Harness.claude.title
-        guard let session = found, !session.claudeSessionID.isEmpty, !session.isStopped, !session.isArchived
+        // Claude's conversation id says Claude runs in the session. Antigravity's
+        // comes only with its first hook, after its sign-in and trust prompts, so
+        // for it the session running is enough, as the daemon checks too.
+        guard let session = found, session.isAntigravity || !session.claudeSessionID.isEmpty,
+              !session.isStopped, !session.isArchived
         else { return "\(agent) isn't running in this session." }
         if item.needsOption {
             return session.status == "waiting" ? nil : "This session isn't waiting for an answer."

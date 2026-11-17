@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -364,6 +366,62 @@ func TestResumeConversation(t *testing.T) {
 
 	if err := c.Call(ipc.OpNew, ipc.NewRequest{Resume: "99999999"}, nil); err == nil {
 		t.Error("an unknown conversation was resumed")
+	}
+}
+
+// agy's conversations are listed with Claude's, newest first, and resumed with
+// agy in their folder.
+func TestResumeAntigravityConversation(t *testing.T) {
+	const (
+		claudeID = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		newer    = "84b306a4-9e41-471f-99b0-07f3bf1ab83b"
+		older    = "ee7b48a5-5c41-4fa1-96d3-40b1ffdd9668"
+	)
+	p := testPaths(t)
+	claude, agy := t.TempDir(), t.TempDir()
+	writeConversation(t, claude, claudeID, "/w/claude", "claude work")
+	soon, past := time.Now().Add(time.Hour).UnixMilli(), time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	must(t, os.WriteFile(filepath.Join(agy, "history.jsonl"), []byte(
+		`{"display":"Delete notes2.txt","timestamp":`+strconv.FormatInt(soon, 10)+`,"workspace":"/w/agy","conversationId":"`+newer+`"}`+"\n"+
+			`{"display":"ping","timestamp":`+strconv.FormatInt(past, 10)+`,"workspace":"/w/old","conversationId":"`+older+`"}`+"\n"), 0o600))
+	fh := &fakeHosts{paths: p}
+	start(t, p, func(c *Config) { c.Hosts, c.ClaudeDir, c.AgyDir = fh, claude, agy })
+	c := dial(t, p)
+
+	var list []ipc.Conversation
+	must(t, c.Call(ipc.OpConversations, nil, &list))
+	if len(list) != 3 || list[0].ID != newer || list[0].Harness != core.HarnessAntigravity || list[0].Cwd != "/w/agy" ||
+		list[0].Title != "Delete notes2.txt" || list[1].ID != claudeID || list[1].Harness != core.HarnessClaude ||
+		list[2].ID != older || list[2].Harness != core.HarnessAntigravity {
+		t.Fatalf("conversations: %+v", list)
+	}
+
+	s := newSess(t, c, ipc.NewRequest{Harness: core.HarnessAntigravity, Resume: "84B306A4"})
+	if s.ClaudeSessionID != newer || !s.IsAntigravity() || s.Cwd != "/w/agy" || s.Name != "Delete notes2.txt" {
+		t.Fatalf("resumed: %+v", s)
+	}
+	r := fh.requests()
+	if len(r) != 1 || r[0].Harness != core.HarnessAntigravity || r[0].Resume != newer || r[0].ClaudeSession != "" || r[0].Dir != "/w/agy" {
+		t.Fatalf("host request: %+v", r)
+	}
+	must(t, c.Call(ipc.OpConversations, nil, &list))
+	if list[0].SessionID != s.ID {
+		t.Errorf("tracked: %+v", list[0])
+	}
+	if again := newSess(t, c, ipc.NewRequest{Harness: core.HarnessAntigravity, Resume: newer}); again.ID != s.ID || len(fh.requests()) != 1 {
+		t.Errorf("resumed twice: %+v", again)
+	}
+
+	// Each agent's ids are looked up in its own history.
+	if err := c.Call(ipc.OpNew, ipc.NewRequest{Resume: newer}, nil); err == nil {
+		t.Error("resumed agy's conversation as Claude's")
+	}
+	if err := c.Call(ipc.OpNew, ipc.NewRequest{Harness: core.HarnessAntigravity, Resume: claudeID}, nil); err == nil ||
+		!strings.Contains(err.Error(), "no Antigravity conversation") {
+		t.Errorf("Claude's id as agy's: %v", err)
+	}
+	if err := c.Call(ipc.OpNew, ipc.NewRequest{Harness: core.HarnessTerminal, Resume: claudeID}, nil); err == nil {
+		t.Error("resumed a terminal conversation")
 	}
 }
 
