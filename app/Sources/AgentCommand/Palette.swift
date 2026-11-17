@@ -148,7 +148,7 @@ enum Palette {
             list.append(PaletteEntry(section: "App", title: title, shortcut: keys.label(.readAloud), action: .toggleReading))
         }
         list.append(PaletteEntry(
-            section: "Claude", title: RemoteControlSetting.paletteTitle(isOn: state.remoteControl), action: .toggleRemoteControl))
+            section: "Sessions", title: RemoteControlSetting.paletteTitle(isOn: state.remoteControl), action: .toggleRemoteControl))
         list.append(PaletteEntry(
             section: "App", title: state.popupReads ? "Stop reading aloud in the popup" : "Read aloud in the popup",
             action: .togglePopupReading))

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -48,5 +49,23 @@ func TestAntigravityMeta(t *testing.T) {
 	}
 	if got := (Claude{}).PromptArgs("-x"); !reflect.DeepEqual(got, []string{"--", "-x"}) {
 		t.Errorf("Claude.PromptArgs = %v", got)
+	}
+}
+
+// With the remote_control setting, agy starts and resumes with --remote-control,
+// first, and not twice when the user's args already have it.
+func TestAntigravityRemoteControl(t *testing.T) {
+	a := Antigravity{Path: "/bin/agy", RemoteControl: true}
+	if got, want := a.Command(Spec{Prompt: "hi"}), []string{"/bin/agy", "--remote-control", "-i=hi"}; !slices.Equal(got, want) {
+		t.Errorf("Command = %q, want %q", got, want)
+	}
+	if got, want := a.Resume("c1", nil), []string{"/bin/agy", "--remote-control", "--conversation", "c1"}; !slices.Equal(got, want) {
+		t.Errorf("Resume = %q, want %q", got, want)
+	}
+	if got, want := a.Command(Spec{Args: []string{"--remote-control"}}), []string{"/bin/agy", "--remote-control"}; !slices.Equal(got, want) {
+		t.Errorf("Command with the flag in args = %q, want %q", got, want)
+	}
+	if got := (Antigravity{Path: "/bin/agy"}).Command(Spec{}); slices.Contains(got, "--remote-control") {
+		t.Errorf("Remote Control off: %q", got)
 	}
 }

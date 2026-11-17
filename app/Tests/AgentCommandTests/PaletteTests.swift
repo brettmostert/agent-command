@@ -92,7 +92,7 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     var state = PaletteState(targets: [claude], sessions: [claude])
     var entries = Palette.entries(state)
     #expect(entry(entries, "App", "Turn speech on")?.action == .toggleSpeech)
-    #expect(entry(entries, "Claude", "Turn Remote Control on for new sessions")?.action == .toggleRemoteControl)
+    #expect(entry(entries, "Sessions", "Turn Remote Control on for new sessions")?.action == .toggleRemoteControl)
     #expect(entry(entries, "App", "Read aloud in the popup") != nil)
     #expect(entry(entries, "App", "Turn popup off")?.action == .togglePopup)
     #expect(titles(entries, in: "App").filter { $0.hasPrefix("Popup style") }.count == ReplyPopupStyle.allCases.count - 1)
@@ -108,7 +108,7 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     entries = Palette.entries(state)
     #expect(entry(entries, "App", "Turn speech off") != nil)
     #expect(entry(entries, "App", "Read the latest message aloud")?.action == .toggleReading)
-    #expect(entry(entries, "Claude", "Turn Remote Control off for new sessions") != nil)
+    #expect(entry(entries, "Sessions", "Turn Remote Control off for new sessions") != nil)
     #expect(entry(entries, "App", "Stop reading aloud in the popup")?.action == .togglePopupReading)
     #expect(entry(entries, "App", "Turn popup on") != nil)
 

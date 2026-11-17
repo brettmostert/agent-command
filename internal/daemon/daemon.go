@@ -71,6 +71,9 @@ type Config struct {
 	// HostFront asks one (default: through its host).
 	FrontEvery time.Duration
 	HostFront  func(sessionID string) (term.Front, bool)
+	// HostAgent asks a session's host for its agent's last OSC 7501 report,
+	// on the same tick (default: through its host).
+	HostAgent func(sessionID string) (term.AgentState, bool)
 	// ScheduleEvery is how often scheduled jobs are checked (15 s), and
 	// Location the time zone their schedules are in (the Mac's).
 	ScheduleEvery time.Duration
@@ -100,6 +103,7 @@ type Daemon struct {
 	bg         *background // d.mu (background.go)
 
 	agentSince map[string]time.Time // front.go: since when an agent without hooks is in front
+	agentSeen  map[string]uint64    // agentstate.go: the last OSC 7501 report applied, per session
 
 	wake waking // wake.go
 }
@@ -130,6 +134,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	if cfg.HostFront == nil {
 		cfg.HostFront = func(id string) (term.Front, bool) { return term.Foreground(cfg.Paths.HostSocket(id)) }
+	}
+	if cfg.HostAgent == nil {
+		cfg.HostAgent = func(id string) (term.AgentState, bool) { return term.AgentStatus(cfg.Paths.HostSocket(id)) }
 	}
 	if err := cfg.Paths.Ensure(); err != nil {
 		return err
@@ -498,7 +505,11 @@ func (d *Daemon) background(ctx context.Context) {
 			if err != nil {
 				d.cfg.Log.Printf("foreground: %v", err)
 			}
-			if changed {
+			agentChanged, err := d.agentStateOnce(ctx)
+			if err != nil {
+				d.cfg.Log.Printf("agent state: %v", err)
+			}
+			if changed || agentChanged {
 				d.changes.bump()
 			}
 		case <-tailT.C:

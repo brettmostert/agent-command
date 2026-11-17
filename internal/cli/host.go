@@ -95,7 +95,16 @@ func hostHarness(p paths.Paths, name string) (harness.Harness, []string, error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		return harness.Antigravity{Path: agy}, env, nil
+		// Read when the session starts, so a change applies to the next one.
+		cfg, err := config.Load(p.Config())
+		if err != nil {
+			return nil, nil, err
+		}
+		// agy reports working, waiting on you, done or failed over OSC 7501 when it
+		// thinks the terminal supports it. The host reads it, whatever the pane
+		// attached to it can show, so it is always on.
+		env = append(env, "AGY_CLI_OSC7501=on")
+		return harness.Antigravity{Path: agy, RemoteControl: cfg.RemoteControl}, env, nil
 	case core.HarnessTerminal:
 		env := loginEnv(p)
 		shell := setup.DefaultShell() // zsh on macOS; bash, or sh, on Linux

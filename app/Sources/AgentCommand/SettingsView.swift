@@ -141,7 +141,7 @@ private struct GeneralSettings: View {
         Section {
             AcmdToggle(
                 title: "Remote Control for new sessions",
-                note: "Use sessions from claude.ai and the Claude app. Applies to sessions started or resumed after the change.",
+                note: "Use Claude sessions from claude.ai and the Claude app, and Antigravity sessions from Antigravity's Remote Control. Applies to sessions started or resumed after the change.",
                 key: "remote_control", model: model, value: model.values.remoteControl)
         }
         Section("Warnings") {

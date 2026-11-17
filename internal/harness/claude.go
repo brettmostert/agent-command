@@ -2,8 +2,9 @@ package harness
 
 import "strings"
 
-// remoteControlFlag turns on Remote Control, so a session can be used from
-// claude.ai and the Claude app.
+// remoteControlFlag turns on Remote Control, so a session can be used
+// remotely: from claude.ai and the Claude app for Claude, from Antigravity's
+// Remote Control browser view for agy. Both CLIs take the same flag.
 const remoteControlFlag = "--remote-control"
 
 // Claude hosts interactive Claude Code. Unlike `--bg`, an interactive
