@@ -105,7 +105,12 @@ func TestVersionMismatch(t *testing.T) {
 		sendLine(t, tc, wire.Hello{Proto: newerProto, Version: "9.9.9", Name: "newer"})
 		var w wire.Welcome
 		r := bufio.NewReader(tc)
-		if err := json.NewDecoder(r).Decode(&w); err != nil {
+		// The whole line: its newline can come in a TLS record of its own.
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(line, &w); err != nil {
 			t.Fatal(err)
 		}
 		if w.Status != wire.StatusVersion || w.Proto != wire.Proto || !strings.Contains(w.Message, "9.9.9") {
