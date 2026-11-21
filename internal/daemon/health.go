@@ -40,6 +40,7 @@ func (d *Daemon) startHealth(ctx context.Context) {
 	if d.cfg.CheckHealth == nil {
 		return
 	}
+	d.healthFilesChanged() // how the files are now: a change after this checks again
 	go func() {
 		d.checkHealth(ctx)
 		every := time.NewTicker(healthEvery)
