@@ -18,7 +18,7 @@ import (
 )
 
 // Proto is bumped only on incompatible protocol changes.
-const Proto = 2
+const Proto = 1
 
 // Ops.
 const (

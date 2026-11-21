@@ -1,7 +1,7 @@
 const std = @import("std");
 const glib = @import("glib");
 
-pub const proto_version: i32 = 2;
+pub const proto_version: i32 = 1;
 pub const max_sun_path: usize = 104;
 pub const max_line: usize = 2 << 20; // 2 MiB, matching internal/ipc/ipc.go MaxLine
 
@@ -701,13 +701,13 @@ test "encodeRequest and decodeResponse match internal/ipc/ipc.go schemas" {
     const allocator = std.testing.allocator;
 
     const hello_req = try encodeRequest(allocator, "hello", Hello{
-        .proto = 2,
+        .proto = 1,
         .version = "0.51.0",
         .pid = 42,
     });
     defer allocator.free(hello_req);
     try std.testing.expectEqualStrings(
-        "{\"op\":\"hello\",\"data\":{\"proto\":2,\"version\":\"0.51.0\",\"pid\":42}}\n",
+        "{\"op\":\"hello\",\"data\":{\"proto\":1,\"version\":\"0.51.0\",\"pid\":42}}\n",
         hello_req,
     );
 

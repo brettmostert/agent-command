@@ -494,7 +494,7 @@ enum DaemonPaths {
 /// the same protocol.
 final class DaemonConnection {
     /// internal/ipc.Proto
-    private static let proto = 2
+    private static let proto = 1
     private let fd: Int32
     private var pending = Data()
 

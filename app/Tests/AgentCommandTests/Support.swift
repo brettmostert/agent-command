@@ -98,7 +98,7 @@ final class FakeDaemon: @unchecked Sendable {
     private var failures: [String: String] = [:]
     private var clients: [Int32] = []
     /// What it says in its hello.
-    var proto = 2
+    var proto = 1
 
     init() throws {
         try isolateFromTheRealDaemon()

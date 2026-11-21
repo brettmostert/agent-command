@@ -120,7 +120,7 @@ extension UsesSharedSpeech {
         @Test func anotherProtocolIsRefused() throws {
             let daemon = try FakeDaemon()
             defer { daemon.stop() }
-            daemon.proto = 3
+            daemon.proto = 2
             #expect(throws: DaemonError.self) { try DaemonConnection(socket: DaemonPaths.socket) }
         }
 
