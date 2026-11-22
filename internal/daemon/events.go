@@ -217,17 +217,23 @@ func (e *eventStream) active(now time.Time) bool {
 // followEvents builds the stream from the daemon's changes while anyone
 // follows it.
 func (d *Daemon) followEvents(ctx context.Context) {
+	var seen uint64 // the revision the last snapshot was built after
 	for {
-		_, next := d.changes.current()
-		select {
-		case <-ctx.Done():
-			return
-		case <-d.stop:
-			return
-		case <-next:
-		case <-d.events.refresh:
+		rev, next := d.changes.current()
+		if rev == seen {
+			select {
+			case <-ctx.Done():
+				return
+			case <-d.stop:
+				return
+			case <-next:
+			case <-d.events.refresh:
+			}
 		}
 		time.Sleep(eventSettle)
+		// The revision before the snapshot is built: a change made while it's
+		// built moves it on, and the loop goes round again for it.
+		seen, _ = d.changes.current()
 		if !d.events.active(d.cfg.Now()) {
 			d.events.forget()
 			continue
