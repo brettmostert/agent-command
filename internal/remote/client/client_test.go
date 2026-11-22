@@ -86,15 +86,24 @@ func TestKnownHosts(t *testing.T) {
 	l.c.mu.Lock()
 	l.c.added["L09"] = &added{Added: Added{ID: "L09", Host: "box", RemoteID: "r1", Archived: true}}
 	l.c.mu.Unlock()
-	if _, err := l.c.EditHost(ctx5(), ipc.RemoteHostEdit{Host: "nope", Name: "x"}); err == nil {
-		t.Error("edited a host that isn't there")
+	if _, err := l.c.EditHost(ctx5(), ipc.RemoteHostEdit{Host: "nope", Name: "x"}); !wire.IsCode(err, wire.CodeNotFound) {
+		t.Errorf("edited a host that isn't there: %v", err)
+	}
+	// An edit from the host as it was before: refused, and nothing changes.
+	before, err := l.c.Host("box")
+	must(t, err)
+	if _, err := l.c.EditHost(ctx5(), ipc.RemoteHostEdit{Host: "box", Address: "a:1", Version: "stale"}); !wire.IsCode(err, api.CodeConflict) {
+		t.Errorf("a stale edit: %v", err)
+	}
+	if now, _ := l.c.Host("box"); now.Address != before.Address || now.Version != before.Version || now.Version == "" {
+		t.Errorf("after a refused edit: %+v", now)
 	}
 	if _, err := l.c.EditHost(ctx5(), ipc.RemoteHostEdit{Host: "box", Name: "studio"}); err == nil {
 		t.Error("renamed onto another host")
 	}
-	st, err = l.c.EditHost(ctx5(), ipc.RemoteHostEdit{Host: "box", Name: "tunnel", Address: "localhost:17434"})
+	st, err = l.c.EditHost(ctx5(), ipc.RemoteHostEdit{Host: "box", Name: "tunnel", Address: "localhost:17434", Version: before.Version})
 	must(t, err)
-	if st.Name != "tunnel" || st.Address != "localhost:17434" || st.Cert != certFile {
+	if st.Name != "tunnel" || st.Address != "localhost:17434" || st.Cert != certFile || st.Version == before.Version {
 		t.Errorf("edited = %+v", st)
 	}
 	l.c.mu.Lock()
@@ -694,12 +703,23 @@ func TestHostSettings(t *testing.T) {
 	if _, ok := st.Values["editor.preset"]; ok {
 		t.Error("saw a device setting")
 	}
-	st, err = l.c.SetConfig(ctx5(), "studio", map[string]any{"default_harness": "antigravity"})
+	loaded := st.Versions["default_harness"]
+	st, err = l.c.SetConfig(ctx5(), "studio", ipc.ConfigSet{Values: map[string]any{"default_harness": "antigravity"},
+		Versions: map[string]string{"default_harness": loaded}})
 	must(t, err)
 	if st.Values["default_harness"] != "antigravity" || r.file.Config().DefaultHarness != "antigravity" {
 		t.Errorf("after set: %v", st.Values["default_harness"])
 	}
-	if _, err := l.c.SetConfig(ctx5(), "studio", map[string]any{"speech.voice": "af_bella"}); err == nil {
+	if st.Versions["default_harness"] == loaded || len(st.Versions) != len(st.Values) {
+		t.Errorf("versions after set: %v", st.Versions)
+	}
+	// From what it was before that change: refused, and the host's stays.
+	_, err = l.c.SetConfig(ctx5(), "studio", ipc.ConfigSet{Values: map[string]any{"default_harness": "claude"},
+		Versions: map[string]string{"default_harness": loaded}})
+	if !wire.IsCode(err, api.CodeConflict) || r.file.Config().DefaultHarness != "antigravity" {
+		t.Errorf("a stale change: %v", err)
+	}
+	if _, err := l.c.SetConfig(ctx5(), "studio", ipc.ConfigSet{Values: map[string]any{"speech.voice": "af_bella"}}); err == nil {
 		t.Error("changed a device setting")
 	}
 	if _, err := l.c.Config(ctx5(), "nowhere"); err == nil {
