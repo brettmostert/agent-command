@@ -58,7 +58,8 @@ func TestKnownHosts(t *testing.T) {
 	// cert's fingerprint is pinned, and its path kept.
 	st, err := l.c.AddHost(ipc.RemoteHostEdit{Name: " studio ", Address: "10.0.0.2:7433", Fingerprint: strings.TrimPrefix(fp, "SHA256:")})
 	must(t, err)
-	if st.Name != "studio" || st.Fingerprint != fp || st.State != ipc.HostIdle || st.OurFingerprint != l.fingerprint() {
+	// A known host is connected to from the start: it may be trying already.
+	if st.Name != "studio" || st.Fingerprint != fp || (st.State != ipc.HostIdle && st.State != ipc.HostConnecting) || st.OurFingerprint != l.fingerprint() {
 		t.Errorf("added = %+v", st)
 	}
 	st, err = l.c.AddHost(ipc.RemoteHostEdit{Name: "box", Address: "localhost:17433", Cert: certFile})
