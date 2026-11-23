@@ -358,14 +358,18 @@ func TestRemoteIdentityRoles(t *testing.T) {
 			t.Errorf("report lacks %q:\n%s", want, out)
 		}
 	}
-	// Your own key, readable by others.
-	must(t, os.Chmod(own.KeyPath, 0o644))
-	if _, out := f.run(); !strings.Contains(out, "✗ Hosting identity key ~/own/key.pem is readable by others") {
-		t.Errorf("report:\n%s", out)
+	// Your own key, readable by others. Windows has no mode bits: identity's
+	// own tests make a key readable through its access list.
+	if runtime.GOOS != "windows" {
+		must(t, os.Chmod(own.KeyPath, 0o644))
+		if _, out := f.run(); !strings.Contains(out, "✗ Hosting identity key ~/own/key.pem is readable by others") {
+			t.Errorf("report:\n%s", out)
+		}
 	}
 	// Your own cert that's gone.
 	must(t, os.Remove(own.CertPath))
-	if _, out := f.run(); !strings.Contains(out, "✗ Hosting identity unusable:") || !strings.Contains(out, "fix: check cert and key in [remote.host] of ~/config/config.toml") {
+	if _, out := f.run(); !strings.Contains(out, "✗ Hosting identity unusable:") ||
+		!strings.Contains(out, "fix: check cert and key in [remote.host] of "+setup.Tilde(p.Config(), f.home)) {
 		t.Errorf("report:\n%s", out)
 	}
 	// Half a pair.
