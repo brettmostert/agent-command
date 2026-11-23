@@ -122,13 +122,16 @@ type DaemonState struct {
 
 // Env is everything the checks read.
 type Env struct {
-	Home     string
-	Paths    paths.Paths
-	Version  string // this binary's version
-	AcmdPath string // the stable path of this binary (what init would write)
-	Getenv   func(string) string
-	Read     func(string) ([]byte, error)
-	Stat     func(string) (fs.FileInfo, error)
+	// ClientOnly is a machine whose daemon runs no sessions (Windows): no
+	// agents, so their checks are left out.
+	ClientOnly bool
+	Home       string
+	Paths      paths.Paths
+	Version    string // this binary's version
+	AcmdPath   string // the stable path of this binary (what init would write)
+	Getenv     func(string) string
+	Read       func(string) ([]byte, error)
+	Stat       func(string) (fs.FileInfo, error)
 	// Resolve follows symlinks (filepath.EvalSymlinks).
 	Resolve func(string) (string, error)
 	// LoginPath is the PATH of the saved login-shell environment.
@@ -150,12 +153,14 @@ type Env struct {
 func Run(ctx context.Context, e Env) *Report {
 	r := &Report{}
 	rec, initDone := checkAcmd(r, e)
-	checkClaude(ctx, r, e, rec, initDone)
-	checkAntigravity(r, e, initDone)
+	if !e.ClientOnly {
+		checkClaude(ctx, r, e, rec, initDone)
+		checkAntigravity(r, e, initDone)
+	}
 	checkDaemon(ctx, r, e)
 	checkService(ctx, r, e)
 	checkIdentity(r, e)
-	if initDone {
+	if initDone && !e.ClientOnly {
 		checkPlan(ctx, r, e)
 	}
 	return r

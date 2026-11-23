@@ -376,3 +376,22 @@ func TestRemoteIdentity(t *testing.T) {
 		t.Errorf("report lacks the mismatch:\n%s", out)
 	}
 }
+
+func TestClientOnlyLeavesOutTheAgents(t *testing.T) {
+	f := newFake(t)
+	// No agents here: their hooks, missing, aren't a problem.
+	must(t, os.Remove(filepath.Join(f.home, ".claude/settings.json")))
+	e := f.Env()
+	e.ClientOnly = true
+	var b bytes.Buffer
+	Run(context.Background(), e).Write(&b)
+	out := b.String()
+	for _, absent := range []string{"Claude Code\n", "Antigravity\n", "setup is up to date"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("a client-only report has %q:\n%s", absent, out)
+		}
+	}
+	if !strings.Contains(out, "Daemon\n") {
+		t.Errorf("a client-only report lacks the daemon:\n%s", out)
+	}
+}
