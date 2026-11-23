@@ -241,6 +241,11 @@ jobs:
         run: make test-ui-core
       - name: build
         run: make build
+      # As the release packs them, so a release is never the first time.
+      - name: pack the Windows zips, and check the Scoop manifest
+        run: |
+          scripts/pack-windows.sh 0.0.0 "$RUNNER_TEMP/windows"
+          make check-scoop
 
   # The two ends of what Linux users run: Debian stable ships older libraries
   # and tools than Ubuntu, and Arch newer ones. Go and Zig are the pinned
