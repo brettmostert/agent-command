@@ -12,7 +12,7 @@ let package = Package(
         .executable(name: "acmd-speech", targets: ["acmd-speech"])
     ],
     dependencies: [
-        .package(url: "https://github.com/Neywa-Labs/mlx-audio-swift.git", exact: "0.1.8"),
+        .package(url: "https://github.com/Neywa-Labs/mlx-audio-swift.git", exact: "0.1.9"),
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.33.0"),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", from: "0.8.1"),
     ],
