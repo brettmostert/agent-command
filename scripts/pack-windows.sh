@@ -21,7 +21,6 @@ for arch in amd64 arm64; do
 	case "$arch" in
 	amd64) machine="x86-64" ;;
 	arm64) machine="(Aarch64|ARM64)" ;; # macOS's file says Aarch64, Linux's ARM64
-
 	esac
 	for exe in acmd.exe acmdw.exe; do
 		info="$(go version -m "$out/$exe")"
