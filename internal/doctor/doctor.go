@@ -631,7 +631,13 @@ func checkRole(r *Report, e Env, what string, f roleFiles) {
 	id, err := identity.Load(cert, key)
 	switch {
 	case errors.Is(err, identity.ErrKeyPermissions):
-		r.add(secRemote, Fail, "chmod 600 "+setup.Tilde(key, e.Home), "%s key %s is readable by others", what, setup.Tilde(key, e.Home))
+		keyFix := "chmod 600 " + setup.Tilde(key, e.Home)
+		if e.OthersCanUse != nil {
+			if _, f, _ := e.OthersCanUse(key); f != "" {
+				keyFix = f
+			}
+		}
+		r.add(secRemote, Fail, keyFix, "%s key %s is readable by others", what, setup.Tilde(key, e.Home))
 	case err != nil:
 		r.add(secRemote, Fail, fix, "%s unusable: %v", what, err)
 	default:

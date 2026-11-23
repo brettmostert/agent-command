@@ -67,6 +67,14 @@ func newFake(t *testing.T) *fake {
 	return f
 }
 
+// othersCanUse is what the CLI gives doctor on this OS.
+func othersCanUse() func(string) (string, string, error) {
+	if runtime.GOOS == "windows" {
+		return paths.OthersCanRead
+	}
+	return nil
+}
+
 // jsonText is s as a JSON string: a Windows path's backslashes escaped.
 func jsonText(s string) string {
 	b, _ := json.Marshal(s)
@@ -98,8 +106,10 @@ func (f *fake) Env() Env {
 			return nil, errors.New("exit status 1")
 		},
 		HasBundle: func(string) bool { return false },
-		Daemon:    func(context.Context) (DaemonState, error) { return f.daemon, nil },
-		InitPlan:  func(context.Context) (*setup.Plan, error) { return f.plan, nil },
+		// As acmd doctor has it: access lists on Windows, mode bits elsewhere.
+		OthersCanUse: othersCanUse(),
+		Daemon:       func(context.Context) (DaemonState, error) { return f.daemon, nil },
+		InitPlan:     func(context.Context) (*setup.Plan, error) { return f.plan, nil },
 	}
 }
 
@@ -381,10 +391,14 @@ func TestRemoteIdentity(t *testing.T) {
 		t.Errorf("report lacks %q:\n%s", want, out)
 	}
 
-	must(t, os.Chmod(id.KeyPath, 0o644))
-	_, out = f.run()
-	if want := "✗ identity key ~/config/identity/key.pem is readable by others\n      fix: chmod 600 ~/config/identity/key.pem"; !strings.Contains(out, want) {
-		t.Errorf("report lacks %q:\n%s", want, out)
+	// Windows has no mode bits: identity's own tests make a key readable
+	// through its access list.
+	if runtime.GOOS != "windows" {
+		must(t, os.Chmod(id.KeyPath, 0o644))
+		_, out = f.run()
+		if want := "✗ identity key ~/config/identity/key.pem is readable by others\n      fix: chmod 600 ~/config/identity/key.pem"; !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
+		}
 	}
 
 	// A cert from another identity: the pair no longer matches.
@@ -417,10 +431,10 @@ func TestClientOnlyLeavesOutTheAgents(t *testing.T) {
 	var b bytes.Buffer
 	Run(context.Background(), e).Write(&b)
 	out := b.String()
-	if !strings.Contains(out, "~/state is accessible by others (Everyone)\n      fix: run icacls") {
+	if !strings.Contains(out, setup.Tilde(f.paths().StateDir, f.home)+" is accessible by others (Everyone)\n      fix: run icacls") {
 		t.Errorf("the access list's Everyone isn't reported:\n%s", out)
 	}
-	for _, absent := range []string{"Claude Code\n", "Antigravity\n", "setup is up to date", "login-shell environment", "~/run is accessible"} {
+	for _, absent := range []string{"Claude Code\n", "Antigravity\n", "setup is up to date", "login-shell environment", setup.Tilde(f.paths().RuntimeDir, f.home) + " is accessible"} {
 		if strings.Contains(out, absent) {
 			t.Errorf("a client-only report has %q:\n%s", absent, out)
 		}
