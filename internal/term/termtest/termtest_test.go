@@ -2,6 +2,7 @@ package termtest
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,5 +45,7 @@ func TestEchoShowsWhatsTyped(t *testing.T) {
 		}
 	}
 	cancel()
-	<-done
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Logf("attach ended: %v", err)
+	}
 }
