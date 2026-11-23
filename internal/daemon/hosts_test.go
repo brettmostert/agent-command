@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,9 +19,11 @@ import (
 	"github.com/brettmostert/agent-command/internal/ipc"
 	"github.com/brettmostert/agent-command/internal/paths"
 	"github.com/brettmostert/agent-command/internal/term"
+	"github.com/brettmostert/agent-command/internal/term/termtest"
 )
 
-// fakeHosts runs each host as an in-process term.Server around `sleep`.
+// fakeHosts runs each host as an in-process term.Server around `sleep`
+// (on Windows, termtest's stand-in).
 type fakeHosts struct {
 	paths paths.Paths
 	fail  error
@@ -34,6 +37,11 @@ func (f *fakeHosts) Start(ctx context.Context, r HostRequest) error {
 	f.mu.Unlock()
 	if f.fail != nil {
 		return f.fail
+	}
+	if runtime.GOOS == "windows" {
+		// No pty there (no ConPTY host): a stand-in terminal.
+		_, err := termtest.Listen(f.paths.HostSocket(r.ID))
+		return err
 	}
 	srv := &term.Server{Socket: f.paths.HostSocket(r.ID), Shell: []string{"/bin/sleep", "30"}, Dir: "/", Env: []string{"PATH=/usr/bin:/bin"}}
 	go func() { _ = srv.Serve(context.WithoutCancel(ctx)) }()

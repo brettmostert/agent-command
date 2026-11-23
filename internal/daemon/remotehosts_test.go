@@ -3,7 +3,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +26,7 @@ import (
 	"github.com/brettmostert/agent-command/internal/remote/wire"
 	"github.com/brettmostert/agent-command/internal/store"
 	"github.com/brettmostert/agent-command/internal/term"
+	"github.com/brettmostert/agent-command/internal/term/termtest"
 )
 
 // otherDaemon is a Remote host's daemon, in memory.
@@ -661,18 +661,7 @@ func (b *otherDaemon) Subscribe(ctx context.Context, _ ipc.SubscribeRequest, sen
 func hostTerminal(t *testing.T, sock, dir string) (typed, shown string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		ln, err := net.Listen("unix", sock)
-		must(t, err)
-		t.Cleanup(func() { _ = ln.Close() })
-		go func() {
-			for {
-				c, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				go echoTerminal(c)
-			}
-		}()
+		termtest.Echo(t, sock)
 		return "remote-42\n", "remote-42"
 	}
 	ready := make(chan struct{})
@@ -684,26 +673,4 @@ func hostTerminal(t *testing.T, sock, dir string) (typed, shown string) {
 	<-ready
 	t.Cleanup(func() { stop(); logErr(t, <-served) })
 	return "echo remote-$((20+22))\n", "remote-42"
-}
-
-// echoTerminal answers one connection as a terminal whose shell shows what's
-// typed: frames of [type][length uint32 BE][payload], input ('i') echoed
-// back as output.
-func echoTerminal(c net.Conn) {
-	defer c.Close()
-	for {
-		var hdr [5]byte
-		if _, err := io.ReadFull(c, hdr[:]); err != nil {
-			return
-		}
-		p := make([]byte, binary.BigEndian.Uint32(hdr[1:]))
-		if _, err := io.ReadFull(c, p); err != nil {
-			return
-		}
-		if hdr[0] == 'i' {
-			if _, err := c.Write(p); err != nil {
-				return
-			}
-		}
-	}
 }

@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -51,9 +52,9 @@ func newFake(t *testing.T) *fake {
 		f.write(filepath.Join(bin, name), "#!/bin/sh\n", 0o755)
 	}
 	p := f.paths()
-	f.write(p.Setup(), `{"version":"0.7.0","at":"2026-10-31T10:00:00Z","acmd_path":"`+f.acmd+`","claude_dir":"`+
-		filepath.Join(home, ".claude")+`"}`, 0o600)
-	f.write(p.Env(), `{"PATH":"`+bin+`"}`, 0o600)
+	f.write(p.Setup(), `{"version":"0.7.0","at":"2026-10-31T10:00:00Z","acmd_path":`+jsonText(f.acmd)+`,"claude_dir":`+
+		jsonText(filepath.Join(home, ".claude"))+`}`, 0o600)
+	f.write(p.Env(), `{"PATH":`+jsonText(bin)+`}`, 0o600)
 	cfg, err := config.Set(config.Template, "editor", "preset", "vscode")
 	must(t, err)
 	cfg, err = config.Set(cfg, "editor", "resolved", filepath.Join(bin, "code"))
@@ -64,6 +65,12 @@ func newFake(t *testing.T) *fake {
 	f.write(filepath.Join(home, ".claude/settings.json"), string(settings), 0o600)
 	must(t, os.Chmod(p.StateDir, 0o700))
 	return f
+}
+
+// jsonText is s as a JSON string: a Windows path's backslashes escaped.
+func jsonText(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func (f *fake) paths() paths.Paths {

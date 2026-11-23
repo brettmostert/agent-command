@@ -852,6 +852,7 @@ func TestPromptFileOps(t *testing.T) {
 
 // This machine's folders, served as the Remote API serves a host's.
 func TestLocalFolderOps(t *testing.T) {
+	sessionsHere(t)
 	p := testPaths(t)
 	home := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(home, "proj", "sub"), 0o750))
