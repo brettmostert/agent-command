@@ -20,7 +20,8 @@ for arch in amd64 arm64; do
 	out="$top/windows-$arch"
 	case "$arch" in
 	amd64) machine="x86-64" ;;
-	arm64) machine="Aarch64" ;;
+	arm64) machine="(Aarch64|ARM64)" ;; # macOS's file says Aarch64, Linux's ARM64
+
 	esac
 	for exe in acmd.exe acmdw.exe; do
 		info="$(go version -m "$out/$exe")"
@@ -37,8 +38,8 @@ for arch in amd64 arm64; do
 		exit 1
 	}
 	# acmd.exe is a console program; acmdw.exe a GUI one, so no window opens.
-	file "$out/acmd.exe" | grep -q "(console).*$machine" || { echo "pack-windows: acmd.exe: $(file "$out/acmd.exe")" >&2; exit 1; }
-	file "$out/acmdw.exe" | grep -q "(GUI).*$machine" || { echo "pack-windows: acmdw.exe: $(file "$out/acmdw.exe")" >&2; exit 1; }
+	file "$out/acmd.exe" | grep -Eq "\(console\).*$machine" || { echo "pack-windows: acmd.exe: $(file "$out/acmd.exe")" >&2; exit 1; }
+	file "$out/acmdw.exe" | grep -Eq "\(GUI\).*$machine" || { echo "pack-windows: acmdw.exe: $(file "$out/acmdw.exe")" >&2; exit 1; }
 	name="acmd-$version-windows-$arch.zip"
 	rm -f "$dist/$name"
 	(cd "$out" && zip -q -X "$dist/$name" acmd.exe acmdw.exe)
