@@ -62,6 +62,9 @@ func TestDefaultOverridesAndLongTmpdir(t *testing.T) {
 }
 
 func TestDefaultRuntimeDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("macOS's and Linux's runtime folders, as Unix paths")
+	}
 	long := "/" + strings.Repeat("d", 120)
 	for _, tc := range []struct {
 		name, goos, xdg, tmp, want string

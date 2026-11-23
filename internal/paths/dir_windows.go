@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -131,28 +130,10 @@ func othersWhoCanWrite(dir string, me *windows.SID) ([]string, error) {
 	return writersOtherThan(dacl, me)
 }
 
-// writersOtherThan lists the SIDs, besides me, that an allow entry in dacl
-// gives a write right. A nil DACL lets everyone in.
+// writersOtherThan lists the accounts, besides me, that an allow entry in
+// dacl gives a write right. A nil DACL lets everyone in.
 func writersOtherThan(dacl *windows.ACL, me *windows.SID) ([]string, error) {
-	if dacl == nil {
-		return []string{"Everyone (no access list)"}, nil
-	}
-	var who []string
-	for i := range uint32(dacl.AceCount) {
-		var ace *windows.ACCESS_ALLOWED_ACE
-		if err := windows.GetAce(dacl, i, &ace); err != nil {
-			return nil, err
-		}
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Mask&writeRights == 0 {
-			continue
-		}
-		// The SID starts where SidStart is, inside the ACE.
-		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)) // #nosec G103 -- the ACE's own SID
-		if !sid.Equals(me) {
-			who = append(who, sid.String())
-		}
-	}
-	return who, nil
+	return grantedOtherThan(dacl, me, writeRights)
 }
 
 // currentUser is the SID of the user this process runs as.

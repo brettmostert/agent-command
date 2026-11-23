@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -65,5 +66,15 @@ func TestADaemonThatRunsSessionsSaysSo(t *testing.T) {
 	must(t, dial(t, p).Call(ipc.OpSnapshot, nil, &snap))
 	if snap.Features == nil || !snap.Features.Host.Sessions {
 		t.Errorf("features = %+v, want sessions", snap.Features)
+	}
+}
+
+// sessionsHere skips a test that runs sessions on this machine: their hosts
+// need a pty, which Windows has none of here (no ConPTY host), and Windows'
+// daemon is client-only. TestClientOnlyDaemon covers it there.
+func sessionsHere(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("runs a session here; Windows is client-only")
 	}
 }

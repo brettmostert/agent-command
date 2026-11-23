@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,6 +16,16 @@ import (
 	"github.com/brettmostert/agent-command/internal/remote/identity"
 	"github.com/brettmostert/agent-command/internal/setup"
 )
+
+// sessionsHere skips a test of a machine that runs sessions: its agents,
+// hooks, login shell and Hosting. Windows is client-only, and its doctor is
+// TestClientOnlyLeavesOutTheAgents.
+func sessionsHere(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("checks a machine that runs sessions; Windows is client-only")
+	}
+}
 
 // fake is a temp home set up the way `acmd init` leaves it.
 type fake struct {
@@ -93,6 +104,7 @@ func (f *fake) run() (*Report, string) {
 }
 
 func TestHealthy(t *testing.T) {
+	sessionsHere(t)
 	f := newFake(t)
 	r, out := f.run()
 	if r.Count(Warn) != 0 || r.Count(Fail) != 0 {
@@ -114,6 +126,7 @@ func TestHealthy(t *testing.T) {
 }
 
 func TestNotSetUp(t *testing.T) {
+	sessionsHere(t)
 	f := newFake(t)
 	must(t, os.Remove(f.paths().Setup()))
 	f.daemon = DaemonState{}
@@ -133,6 +146,7 @@ func TestNotSetUp(t *testing.T) {
 }
 
 func TestProblems(t *testing.T) {
+	sessionsHere(t)
 	f := newFake(t)
 	home, p := f.home, f.paths()
 	must(t, os.Chmod(p.StateDir, 0o755))
@@ -215,6 +229,7 @@ func TestProblems(t *testing.T) {
 }
 
 func TestDaemonAndPlanErrors(t *testing.T) {
+	sessionsHere(t)
 	f := newFake(t)
 	env := f.Env()
 	env.Daemon = func(context.Context) (DaemonState, error) { return DaemonState{}, errors.New("permission denied") }
@@ -230,6 +245,7 @@ func TestDaemonAndPlanErrors(t *testing.T) {
 }
 
 func TestVersions(t *testing.T) {
+	sessionsHere(t)
 	for _, c := range []struct {
 		a, b string
 		want int
@@ -251,6 +267,7 @@ func must(t *testing.T, err error) {
 }
 
 func TestAntigravity(t *testing.T) {
+	sessionsHere(t)
 	f := newFake(t)
 	hooks := filepath.Join(f.home, ".gemini/config/hooks.json")
 
@@ -383,10 +400,20 @@ func TestClientOnlyLeavesOutTheAgents(t *testing.T) {
 	must(t, os.Remove(filepath.Join(f.home, ".claude/settings.json")))
 	e := f.Env()
 	e.ClientOnly = true
+	// Windows: the access lists say who can use acmd's folders.
+	e.OthersCanUse = func(p string) (string, string, error) {
+		if p == f.paths().StateDir {
+			return "Everyone", "run icacls", nil
+		}
+		return "", "", nil
+	}
 	var b bytes.Buffer
 	Run(context.Background(), e).Write(&b)
 	out := b.String()
-	for _, absent := range []string{"Claude Code\n", "Antigravity\n", "setup is up to date"} {
+	if !strings.Contains(out, "~/state is accessible by others (Everyone)\n      fix: run icacls") {
+		t.Errorf("the access list's Everyone isn't reported:\n%s", out)
+	}
+	for _, absent := range []string{"Claude Code\n", "Antigravity\n", "setup is up to date", "login-shell environment", "~/run is accessible"} {
 		if strings.Contains(out, absent) {
 			t.Errorf("a client-only report has %q:\n%s", absent, out)
 		}

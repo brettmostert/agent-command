@@ -3,12 +3,14 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -271,14 +273,7 @@ func TestSessionsFromARemoteHost(t *testing.T) {
 	hostapi.Register(h, b, hostapi.Options{Home: other})
 	h.Reload()
 	sock := filepath.Join(other, "r1.sock")
-	ready := make(chan struct{})
-	srv := &term.Server{Socket: sock, Shell: []string{"/bin/sh"}, Dir: other, Env: []string{"PS1=$ ", "PATH=/usr/bin:/bin"},
-		Ready: func() { close(ready) }}
-	srvCtx, stopSrv := context.WithCancel(context.Background())
-	served := make(chan error, 1)
-	go func() { served <- srv.Serve(srvCtx) }()
-	<-ready
-	t.Cleanup(func() { stopSrv(); logErr(t, <-served) })
+	typed, shown := hostTerminal(t, sock, other)
 	b.change(func() {
 		b.sockets["r1"] = sock
 		// The host's own Default has the id every Default has: "default".
@@ -360,8 +355,8 @@ func TestSessionsFromARemoteHost(t *testing.T) {
 	in := make(chan []byte, 4)
 	done := make(chan error, 1)
 	go func() { done <- term.Attach(ctx, p.HostSocket(s.ID), in, nil, 24, 80, out) }()
-	in <- []byte("echo remote-$((20+22))\n")
-	waitFor(t, "the output", func() bool { return strings.Contains(out.String(), "remote-42") })
+	in <- []byte(typed)
+	waitFor(t, "the output", func() bool { return strings.Contains(out.String(), shown) })
 
 	// The inbox: its history, read and answered on the host, by {host, id}.
 	var page ipc.InboxPage
@@ -653,6 +648,62 @@ func (b *otherDaemon) Subscribe(ctx context.Context, _ ipc.SubscribeRequest, sen
 		case <-next:
 		case <-ctx.Done():
 			return nil
+		}
+	}
+}
+
+// hostTerminal serves sock as the host's session terminal, and says what to
+// type and the output that shows it ran. Where there's a pty it's a real
+// shell. Windows has none (no ConPTY host), and a host is never Windows: there
+// a stand-in speaks the terminal's frames and echoes what's typed, so the
+// client's half (this machine's socket, the connection, the host's relay) is
+// still the real one.
+func hostTerminal(t *testing.T, sock, dir string) (typed, shown string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		ln, err := net.Listen("unix", sock)
+		must(t, err)
+		t.Cleanup(func() { _ = ln.Close() })
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				go echoTerminal(c)
+			}
+		}()
+		return "remote-42\n", "remote-42"
+	}
+	ready := make(chan struct{})
+	srv := &term.Server{Socket: sock, Shell: []string{"/bin/sh"}, Dir: dir, Env: []string{"PS1=$ ", "PATH=/usr/bin:/bin"},
+		Ready: func() { close(ready) }}
+	ctx, stop := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ctx) }()
+	<-ready
+	t.Cleanup(func() { stop(); logErr(t, <-served) })
+	return "echo remote-$((20+22))\n", "remote-42"
+}
+
+// echoTerminal answers one connection as a terminal whose shell shows what's
+// typed: frames of [type][length uint32 BE][payload], input ('i') echoed
+// back as output.
+func echoTerminal(c net.Conn) {
+	defer c.Close()
+	for {
+		var hdr [5]byte
+		if _, err := io.ReadFull(c, hdr[:]); err != nil {
+			return
+		}
+		p := make([]byte, binary.BigEndian.Uint32(hdr[1:]))
+		if _, err := io.ReadFull(c, p); err != nil {
+			return
+		}
+		if hdr[0] == 'i' {
+			if _, err := c.Write(p); err != nil {
+				return
+			}
 		}
 	}
 }

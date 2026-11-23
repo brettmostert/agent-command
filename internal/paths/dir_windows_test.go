@@ -129,3 +129,31 @@ func TestWritersOtherThanANilListIsEveryone(t *testing.T) {
 		t.Errorf("a nil access list: %v (%v)", who, err)
 	}
 }
+
+func TestOthersCanReadFollowsTheAccessList(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "id")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(dir, "key.pem")
+	if err := os.WriteFile(key, []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A temp folder's usual list (you, SYSTEM, Administrators) is private.
+	if who, _, err := OthersCanRead(key); err != nil || who != "" {
+		t.Fatalf("a key in a temp folder: readers %q (%v)", who, err)
+	}
+	grantEveryoneWrite(t, key)
+	who, fix, err := OthersCanRead(key)
+	if err != nil || who == "" || !strings.Contains(fix, "icacls") {
+		t.Fatalf("Everyone can read it: who %q, fix %q (%v)", who, fix, err)
+	}
+	// Making its folder private takes Everyone away from the key too, once it
+	// inherits again.
+	if err := MakePrivate(dir); err != nil {
+		t.Fatal(err)
+	}
+	if who, _, _ := OthersCanRead(dir); who != "" {
+		t.Errorf("the folder made private: readers %q", who)
+	}
+}
