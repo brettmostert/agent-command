@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -405,8 +406,9 @@ func readInput(ctx context.Context, detached func(), detach bool) (<-chan []byte
 	in := make(chan []byte, 16)
 	r, err := cancelreader.NewReader(attachStdin)
 	if err != nil {
-		close(in)
-		return in, func() {}
+		// Not a file it can watch (/dev/null under CI's epoll): read it as
+		// is, without cancelling.
+		r = plainReader{attachStdin}
 	}
 	done := make(chan struct{})
 	go func() {
@@ -442,6 +444,12 @@ func readInput(ctx context.Context, detached func(), detach bool) (<-chan []byte
 		_ = r.Close()
 	}
 }
+
+// plainReader reads stdin when it can't be watched for cancelling.
+type plainReader struct{ io.Reader }
+
+func (plainReader) Cancel() bool { return false }
+func (plainReader) Close() error { return nil }
 
 // beforeDetach is a copy of the input up to Ctrl+], in any of its forms, and
 // whether it was there (never, when detach isn't set).

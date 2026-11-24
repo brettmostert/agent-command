@@ -865,3 +865,32 @@ func jsonText(t *testing.T, s string) string {
 	}
 	return string(b)
 }
+
+// Stdin that can't be watched (/dev/null, as under CI) is still read: the
+// attach sees its end, not closed input.
+func TestAttachInputReadsStdinItCantWatch(t *testing.T) {
+	old := attachStdin
+	t.Cleanup(func() { attachStdin = old })
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	attachStdin = devNull{f}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	in, stop := readInput(ctx, cancel, true)
+	stop()
+	select {
+	case _, ok := <-in:
+		if !ok {
+			t.Error("input closed")
+		}
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// devNull is /dev/null with an fd cancelreader won't accept.
+type devNull struct{ *os.File }
+
+func (devNull) Fd() uintptr { return ^uintptr(0) }
