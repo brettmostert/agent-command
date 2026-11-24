@@ -167,7 +167,8 @@ private struct GeneralSettings: View {
 
     var body: some View {
         Section {
-            Toggle(isOn: Binding(get: { atLogin }, set: setAtLogin)) {
+            // A closure, not setAtLogin itself: Swift 6.3 crashes making that a Binding's setter.
+            Toggle(isOn: Binding(get: { atLogin }, set: { setAtLogin($0) })) {
                 Text("Open at login")
                 Text("So the reply popup, notifications and the Dock badge are there from the start.")
             }
