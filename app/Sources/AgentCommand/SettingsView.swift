@@ -3,7 +3,7 @@ import ServiceManagement
 import SwiftUI
 
 /// The parts of the Settings window, in its sidebar.
-enum SettingsSection: String, CaseIterable, Identifiable {
+nonisolated enum SettingsSection: String, CaseIterable, Identifiable {
     case general, harnesses, notifications, popup, speech, scheduled, remote, appearance, keyboard, editor, advanced
 
     var id: String { rawValue }
