@@ -407,7 +407,7 @@ func readInput(ctx context.Context, detached func(), detach bool) (<-chan []byte
 	r, err := cancelreader.NewReader(attachStdin)
 	if err != nil {
 		// Not a file it can watch (/dev/null under CI's epoll): read it as
-		// is, without cancelling.
+		// is, without canceling.
 		r = plainReader{attachStdin}
 	}
 	done := make(chan struct{})
@@ -445,7 +445,7 @@ func readInput(ctx context.Context, detached func(), detach bool) (<-chan []byte
 	}
 }
 
-// plainReader reads stdin when it can't be watched for cancelling.
+// plainReader reads stdin when it can't be watched for canceling.
 type plainReader struct{ io.Reader }
 
 func (plainReader) Cancel() bool { return false }
