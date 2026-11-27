@@ -84,13 +84,11 @@ type Group struct {
 
 // ViewState is how the list is shown.
 type ViewState struct {
-	Mode         string          `json:"mode"` // "groups" | "list"
-	Sort         string          `json:"sort"` // "created" | "name" | "activity" | "status" | "cwd"
-	Desc         bool            `json:"desc,omitempty"`
-	Filter       string          `json:"filter,omitempty"`
-	FocusedGroup string          `json:"focused_group,omitempty"`
-	PreFocus     map[string]bool `json:"pre_focus,omitempty"`
-	ShowArchived bool            `json:"show_archived,omitempty"`
+	Mode         string `json:"mode"` // "groups" | "list"
+	Sort         string `json:"sort"` // "created" | "name" | "activity" | "status" | "cwd"
+	Desc         bool   `json:"desc,omitempty"`
+	Filter       string `json:"filter,omitempty"`
+	ShowArchived bool   `json:"show_archived,omitempty"`
 	// Collapsed are the collapsed groups' ids.
 	Collapsed []string `json:"collapsed,omitempty"`
 }
@@ -174,14 +172,14 @@ func (g *Group) Core(collapsed bool) *core.Group {
 
 // ViewStateOf is v on the wire.
 func ViewStateOf(v core.ViewState) ViewState {
-	return ViewState{Mode: v.Mode, Sort: v.Sort, Desc: v.Desc, Filter: v.Filter, FocusedGroup: v.FocusedGroup,
-		PreFocus: v.PreFocus, ShowArchived: v.ShowArchived, Collapsed: v.Collapsed}
+	return ViewState{Mode: v.Mode, Sort: v.Sort, Desc: v.Desc, Filter: v.Filter,
+		ShowArchived: v.ShowArchived, Collapsed: v.Collapsed}
 }
 
 // Core is the view as internal/core has it.
 func (v ViewState) Core() core.ViewState {
-	return core.ViewState{Mode: v.Mode, Sort: v.Sort, Desc: v.Desc, Filter: v.Filter, FocusedGroup: v.FocusedGroup,
-		PreFocus: v.PreFocus, ShowArchived: v.ShowArchived, Collapsed: v.Collapsed}
+	return core.ViewState{Mode: v.Mode, Sort: v.Sort, Desc: v.Desc, Filter: v.Filter,
+		ShowArchived: v.ShowArchived, Collapsed: v.Collapsed}
 }
 
 // CoreSessions are the snapshot's sessions as internal/core has them.

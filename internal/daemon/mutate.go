@@ -191,8 +191,6 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 		return nil, d.updateViewState(ctx, func(vs *core.ViewState) { vs.Filter = m.Text })
 	case ipc.MutViewArchived:
 		return nil, d.updateViewState(ctx, func(vs *core.ViewState) { vs.ShowArchived = m.Flag })
-	case ipc.MutViewFocus:
-		return nil, d.focus(ctx, m.GroupID)
 	case ipc.MutInboxRead:
 		return nil, d.store.SetInboxRead(ctx, m.LocalItemIDs, m.Flag)
 	case ipc.MutInboxDismiss:
@@ -316,33 +314,6 @@ func (d *Daemon) archiveGroup(ctx context.Context, id string) error {
 		d.stopHost(s)
 	}
 	return nil
-}
-
-// focus enters (groupID != "") or leaves focus mode, persisting the
-// collapse plan from core.FocusGroup / core.ClearFocus.
-func (d *Daemon) focus(ctx context.Context, groupID string) error {
-	vs, err := d.store.ViewState(ctx)
-	if err != nil {
-		return err
-	}
-	groups, err := d.store.Groups(ctx, false)
-	if err != nil {
-		return err
-	}
-	var plan map[string]bool
-	if groupID == "" {
-		plan = core.ClearFocus(&vs)
-	} else if plan, err = core.FocusGroup(&vs, groups, groupID); err != nil {
-		return err
-	}
-	for _, g := range groups {
-		if want, ok := plan[g.ID]; ok && want != g.Collapsed {
-			if err := d.store.SetGroupCollapsed(ctx, g.ID, want); err != nil {
-				return err
-			}
-		}
-	}
-	return d.store.PutViewState(ctx, vs)
 }
 
 // moveGroup puts a group right after the group after, or right before the

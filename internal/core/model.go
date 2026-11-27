@@ -206,8 +206,6 @@ type ViewState struct {
 	Sort         string // "created" | "name" | "activity" | "status" | "cwd"
 	Desc         bool
 	Filter       string
-	FocusedGroup string
-	PreFocus     map[string]bool
 	ShowArchived bool
 	// Collapsed are the collapsed groups' ids. The daemon fills it in from
 	// its groups when it sends the view.

@@ -274,30 +274,3 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&desc, "desc", false, "descending")
 	return cmd
 }
-
-func newFocusGroupCmd() *cobra.Command {
-	var leave bool
-	cmd := &cobra.Command{
-		Use:   "focus-group <group>|--clear",
-		Short: "Expand one group and collapse the others (or leave focus mode)",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if leave == (len(args) == 1) {
-				return errors.New("give a group name or --clear")
-			}
-			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				id := ""
-				if !leave {
-					g, err := resolveGroup(snap, args[0])
-					if err != nil {
-						return err
-					}
-					id = g.ID
-				}
-				return c.mutate(ipc.Mutation{Kind: ipc.MutViewFocus, GroupID: id}, nil)
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&leave, "clear", false, "leave focus mode, restoring the previous collapse state")
-	return cmd
-}

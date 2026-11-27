@@ -295,16 +295,6 @@ func TestGroupsMoveViewAndFocus(t *testing.T) {
 		t.Error("collapse needs a group or --all")
 	}
 
-	// Focus mode collapses the others and restores them after.
-	mustRun(t, "focus-group", "billing v2")
-	if rows = listed(t); rows[0].Number != 0 || rows[2].Number != 1 {
-		t.Errorf("focus: %+v", rows)
-	}
-	mustRun(t, "focus-group", "--clear")
-	if rows = listed(t); rows[0].Number != 1 {
-		t.Errorf("after clear: %+v", rows)
-	}
-
 	mustRun(t, "view-mode", "list")
 	mustRun(t, "sort", "name", "--desc")
 	if got := names(listJSON(t)); !strings.HasPrefix(got, "refactor") {

@@ -159,7 +159,6 @@ pub const ViewState = struct {
     sort: []const u8 = "created",
     desc: bool = false,
     filter: []const u8 = "",
-    focused_group: []const u8 = "",
     show_archived: bool = false,
 };
 

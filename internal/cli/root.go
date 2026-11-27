@@ -27,7 +27,7 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(stderr)
 	root.AddCommand(newReportCmd(), newVersionCmd(), newPathsCmd(), newDaemonCmd(), newServiceCmd(), newHookCmd(),
 		newListCmd(), newScreenCmd(), newRenameCmd(), newDescribeCmd(), newFinishCmd(), newArchiveCmd(), newUnarchiveCmd(), newMoveCmd(),
-		newGroupCmd(), newViewModeCmd(), newSortCmd(), newFocusGroupCmd(),
+		newGroupCmd(), newViewModeCmd(), newSortCmd(),
 		newInitCmd(), newUninstallCmd(), newEditorCmd(), newAgentRemoteControlCmd(), newRemoteControlCmd(), newConfigCmd(), newKeysCmd(), newDoctorCmd(),
 		newNewCmd(), newResumeCmd(), newAttachCmd(), newInboxCmd(), newWatchCmd(), newClientsCmd(), newEventsCmd(), newSpeechCmd(), newHostCmd(), newOpenCmd(), newEditCmd(), newPurgeCmd(), newScheduleCmd(), newHarnessCmd())
 	root.AddCommand(newRemoteCmd())
@@ -36,7 +36,7 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 	// Using acmd for the first time offers setup.
 	for _, c := range root.Commands() {
 		switch c.Name() {
-		case "list", "rename", "describe", "archive", "unarchive", "move", "group", "view-mode", "sort", "focus-group",
+		case "list", "rename", "describe", "archive", "unarchive", "move", "group", "view-mode", "sort",
 			"new", "resume", "attach", "inbox", "open", "purge", "schedule":
 			c.Annotations = map[string]string{needsSetup: "yes"}
 		}
@@ -45,7 +45,7 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 	for _, c := range root.Commands() {
 		switch c.Name() {
 		case "list", "screen", "rename", "describe", "finish", "archive", "unarchive", "move", "group", "view-mode", "sort",
-			"focus-group", "new", "resume", "attach", "purge", "schedule", "config", "clients", "keys":
+			"new", "resume", "attach", "purge", "schedule", "config", "clients", "keys":
 			markOnHost(c)
 		}
 	}

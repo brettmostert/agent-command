@@ -381,8 +381,7 @@ func TestViewsAndViewState(t *testing.T) {
 	if vs, err := s.ViewState(ctx); err != nil || vs.Mode != "groups" || vs.Sort != "created" {
 		t.Fatalf("default view state: %+v %v", vs, err)
 	}
-	want := core.ViewState{Mode: "list", Sort: "activity", Desc: true, Filter: "g:proj", FocusedGroup: "g1",
-		PreFocus: map[string]bool{"g2": true}, ShowArchived: true}
+	want := core.ViewState{Mode: "list", Sort: "activity", Desc: true, Filter: "g:proj", ShowArchived: true}
 	if err := s.PutViewState(ctx, want); err != nil {
 		t.Fatal(err)
 	}
@@ -716,5 +715,17 @@ func TestSessionJobMigration(t *testing.T) {
 		if got, err := s.Session(ctx, id); err != nil || got.JobID != want {
 			t.Errorf("%s: JobID %+v, want %q (%v)", id, got, want, err)
 		}
+	}
+}
+
+// A view state saved while the daemon kept focus mode still loads.
+func TestViewStateFromBeforeFocusModeWent(t *testing.T) {
+	s, _ := open(t)
+	if _, err := s.q.ExecContext(ctx, `INSERT INTO view_state (id, state) VALUES (1, ?)`,
+		`{"Mode":"groups","Sort":"name","FocusedGroup":"g1","PreFocus":{"g2":true}}`); err != nil {
+		t.Fatal(err)
+	}
+	if vs, err := s.ViewState(ctx); err != nil || vs.Mode != "groups" || vs.Sort != "name" {
+		t.Errorf("view state: %+v %v", vs, err)
 	}
 }

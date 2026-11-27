@@ -21,7 +21,6 @@ type Row struct {
 	Count     int    // sessions in the group (after filtering)
 	Urgent    Status // most urgent status in the group, for collapsed headers
 	Collapsed bool
-	Focused   bool // the focused group (focus mode)
 }
 
 // IsHeader reports whether this is a group header row.
@@ -99,7 +98,7 @@ func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 			continue // filtering hides groups without matches
 		}
 		collapsed := (g.Collapsed || vs.IsCollapsed(g.ID)) && !f.active() // matches expand while filtering
-		h := Row{Group: g, Count: len(ms), Urgent: mostUrgent(ms), Collapsed: collapsed, Focused: vs.FocusedGroup == g.ID}
+		h := Row{Group: g, Count: len(ms), Urgent: mostUrgent(ms), Collapsed: collapsed}
 		rows = append(rows, h)
 		if collapsed {
 			continue
@@ -289,44 +288,6 @@ func (f filter) match(s *Session, g *Group) bool {
 		}
 	}
 	return true
-}
-
-// FocusGroup expands the target group and collapses the others, saving the
-// previous collapse state in vs.PreFocus. It returns the
-// desired collapsed state per group id; the caller persists both.
-func FocusGroup(vs *ViewState, groups []*Group, id string) (map[string]bool, error) {
-	found := false
-	for _, g := range groups {
-		if g.ID == id {
-			found = true
-		}
-	}
-	if !found {
-		return nil, fmt.Errorf("group %s not found", id)
-	}
-	if vs.FocusedGroup == "" {
-		vs.PreFocus = map[string]bool{}
-		for _, g := range groups {
-			vs.PreFocus[g.ID] = g.Collapsed
-		}
-	}
-	vs.FocusedGroup = id
-	vs.Mode = "groups"
-	want := map[string]bool{}
-	for _, g := range groups {
-		want[g.ID] = g.ID != id
-	}
-	return want, nil
-}
-
-// ClearFocus leaves focus mode and returns the collapse state to restore.
-func ClearFocus(vs *ViewState) map[string]bool {
-	restore := vs.PreFocus
-	vs.FocusedGroup, vs.PreFocus = "", nil
-	if restore == nil {
-		restore = map[string]bool{}
-	}
-	return restore
 }
 
 // Selector errors.

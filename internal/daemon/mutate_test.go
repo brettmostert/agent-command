@@ -81,25 +81,11 @@ func TestMutations(t *testing.T) {
 		t.Errorf("view state: %+v", vs)
 	}
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCollapse, Flag: false}) // all
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewFocus, GroupID: g.ID})
-	snap = snapshot(t, c)
-	if snap.ViewState.FocusedGroup != g.ID || snap.ViewState.Mode != "groups" {
-		t.Errorf("focus: %+v", snap.ViewState)
-	}
-	for _, x := range snap.Groups {
-		if x.IsDefault && !snap.ViewState.IsCollapsed(x.ID) {
-			t.Error("focus should collapse the other groups")
-		}
-	}
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewFocus})
-	if got := snapshot(t, c).ViewState.Collapsed; len(got) != 0 {
-		t.Errorf("clear focus should restore every group, still collapsed: %v", got)
-	}
 
 	for _, bad := range []ipc.Mutation{
 		{Kind: ipc.MutViewMode, Text: "tree"},
 		{Kind: ipc.MutViewSort, Text: "size"},
-		{Kind: ipc.MutViewFocus, GroupID: "nope"},
+		{Kind: "view.focus", GroupID: "nope"}, // focus is each client's own view
 		{Kind: "nope"}} {
 		if err := c.Call(ipc.OpMutate, bad, nil); err == nil {
 			t.Errorf("%+v accepted", bad)

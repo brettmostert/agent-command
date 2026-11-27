@@ -30,9 +30,6 @@ func render(rows []Row) string {
 			if r.Collapsed {
 				h += " +"
 			}
-			if r.Focused {
-				h += " ◉"
-			}
 			parts = append(parts, h+"]")
 			continue
 		}
@@ -144,52 +141,6 @@ func TestNaturalCompare(t *testing.T) {
 	big := strings.Repeat("9", 40)
 	if naturalCompare("n"+big, "n1"+big) >= 0 {
 		t.Error("long digit runs must compare by magnitude without overflow")
-	}
-}
-
-func TestFocusGroupAndClear(t *testing.T) {
-	_, gs := fixtureView()
-	gs[1].Collapsed = true // billing collapsed before focusing
-	vs := ViewState{Mode: "list"}
-	want, err := FocusGroup(&vs, gs, "g1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if vs.FocusedGroup != "g1" || vs.Mode != "groups" {
-		t.Errorf("view state: %+v", vs)
-	}
-	if want["g1"] || !want["g2"] || !want["default"] {
-		t.Errorf("collapse plan: %v", want)
-	}
-	if !vs.PreFocus["g2"] || vs.PreFocus["g1"] {
-		t.Errorf("saved state: %v", vs.PreFocus)
-	}
-
-	// Refocusing keeps the original saved state.
-	gs[1].Collapsed = true
-	gs[0].Collapsed = true
-	if _, err := FocusGroup(&vs, gs, "g2"); err != nil {
-		t.Fatal(err)
-	}
-	if vs.PreFocus["default"] {
-		t.Errorf("refocus overwrote saved state: %v", vs.PreFocus)
-	}
-	rows := Layout(nil, gs, vs)
-	for _, r := range rows {
-		if r.Group.ID == "g2" && !r.Focused {
-			t.Error("focused header not marked")
-		}
-	}
-
-	restore := ClearFocus(&vs)
-	if vs.FocusedGroup != "" || vs.PreFocus != nil || !restore["g2"] || restore["g1"] {
-		t.Errorf("clear: %+v restore %v", vs, restore)
-	}
-	if r := ClearFocus(&vs); r == nil || len(r) != 0 {
-		t.Errorf("clear without focus: %v", r)
-	}
-	if _, err := FocusGroup(&vs, gs, "nope"); err == nil {
-		t.Error("focusing a missing group should fail")
 	}
 }
 

@@ -1649,20 +1649,6 @@
       }
     },
     {
-      "name": "view.focus",
-      "description": "Shows only one group, or every group again.",
-      "scope": "act",
-      "kind": "change",
-      "grant": "host",
-      "transport": {
-        "op": "mutate",
-        "kind": "view.focus"
-      },
-      "input": {
-        "$ref": "#/$defs/ipc.Mutation"
-      }
-    },
-    {
       "name": "view.mode",
       "description": "Shows sessions in groups or as one list.",
       "scope": "act",
@@ -4337,15 +4323,6 @@
         },
         "filter": {
           "type": "string"
-        },
-        "focused_group": {
-          "type": "string"
-        },
-        "pre_focus": {
-          "additionalProperties": {
-            "type": "boolean"
-          },
-          "type": "object"
         },
         "show_archived": {
           "type": "boolean"
