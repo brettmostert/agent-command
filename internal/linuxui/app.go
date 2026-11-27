@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -451,7 +452,9 @@ func (u *uiApp) renderSidebar(ctx context.Context) {
 			}
 			lbl := gtk.NewLabel(fmt.Sprintf("%s %s (%d)", arrow, r.Title(), r.Count))
 			lbl.AddCssClass("heading")
-			if r.Group != nil && r.Group.Color != "" {
+			// The theme's six have a class; the Linux UI draws other colors
+			// (bright, fixed, #RRGGBB) in the plain heading color for now.
+			if r.Group != nil && slices.Contains(core.ThemeColors[:6], r.Group.Color) {
 				lbl.AddCssClass("group-" + r.Group.Color)
 			}
 			lbl.SetXalign(0)

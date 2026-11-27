@@ -189,8 +189,16 @@ struct SidebarView: View {
                     Button("Make Folder…") { chooseGroupPath(group) }
                 }
                 Menu("Colour") {
-                    ForEach(SessionGroup.colors, id: \.self) { color in
-                        Button(color.capitalized) { store.setGroupColor(group.key, color) }
+                    Section("Theme") {
+                        ForEach(GroupColor.themeNames, id: \.self) { colorButton(group, $0) }
+                    }
+                    Section("Fixed") {
+                        ForEach(GroupColor.fixed.map { "fixed-" + $0.name }, id: \.self) { colorButton(group, $0) }
+                    }
+                    Divider()
+                    Button("Custom…") {
+                        let start = GroupColor.resolve(group.color, isDark: theme.isDark).nsColor(theme: theme)
+                        CustomGroupColor.shared.open(start: start) { store.setGroupColor(group.key, $0) }
                     }
                 }
                 Button("Move Up") { store.moveGroup(group.key, by: -1) }
@@ -229,6 +237,15 @@ struct SidebarView: View {
     }
 
     /// The groups a session can move to, and a new one.
+    /// A Colour menu item: the colour's dot and name, ticked if it's the group's.
+    private func colorButton(_ group: SessionGroup, _ color: String) -> some View {
+        Button { store.setGroupColor(group.key, color) } label: {
+            Label { Text((group.color == color ? "✓ " : "") + GroupColor.label(color)) } icon: {
+                Image(nsImage: GroupColor.swatch(color, theme: theme))
+            }
+        }
+    }
+
     @ViewBuilder private func moveToGroupMenu(_ session: Session) -> some View {
         Menu("Move to Group") {
             ForEach(SidebarLayout.groups(for: session, in: store.groups)) { group in
@@ -414,17 +431,7 @@ struct GroupHeaderRow: View {
             .help(group.isFolder ? "Folder: \(group.path)" : "Group")
     }
 
-    static func color(_ name: String, theme: AppTheme) -> Color {
-        switch name {
-        case "blue": theme.blue
-        case "magenta": theme.magenta
-        case "cyan": theme.cyan
-        case "yellow": theme.yellow
-        case "green": theme.green
-        case "red": theme.red
-        default: theme.fg
-        }
-    }
+    static func color(_ name: String, theme: AppTheme) -> Color { GroupColor.color(name, theme: theme) }
 
     var body: some View {
         HStack(spacing: 6) {

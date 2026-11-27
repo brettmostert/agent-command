@@ -144,8 +144,8 @@ func startRemoteSession(cmd *cobra.Command, o newOptions, on remoteNewOptions) e
 				return err
 			}
 			// The host's group: it keeps its own, and the session starts there.
-			g, err := resolveGroupOn(snap, o.group, on.host)
-			if err != nil && o.noCreate {
+			g, err := liveGroupOn(snap, o.group, on.host)
+			if err != nil && (o.noCreate || errors.As(err, new(archivedGroupError))) {
 				return err
 			}
 			if err != nil {
@@ -213,8 +213,8 @@ func startOnHost(ctx context.Context, o newOptions, dir string) (*core.Session, 
 			return err
 		}
 		if o.group != "" {
-			g, err := resolveGroup(snap, o.group)
-			if err != nil && o.noCreate {
+			g, err := liveGroupOn(snap, o.group, "")
+			if err != nil && (o.noCreate || errors.As(err, new(archivedGroupError))) {
 				return err
 			}
 			if err != nil {

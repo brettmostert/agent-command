@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -159,10 +160,54 @@ func TestUnarchivingASessionWhoseGroupsNameIsTaken(t *testing.T) {
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "g"}) // the name, live again
 
 	err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutUnarchive, Targets: ipc.Here(ids[0])}, nil)
-	if !hasCode(err, ipc.CodeInvalid) || !strings.Contains(err.Error(), "another group has that name") {
-		t.Fatalf("want invalid naming the clash, got %v", err)
+	if !hasCode(err, ipc.CodeConflict) || !strings.Contains(err.Error(), "another group has that name") {
+		t.Fatalf("want a conflict naming the clash, got %v", err)
 	}
 	if archivedCount(t, c, "a") != 1 || !groupArchived(t, c, g.ID) {
 		t.Error("a failed unarchive changed the session or its group")
+	}
+
+	// Under a new name, it comes back (PAN-190); a name that's taken too is
+	// still a conflict, and changes nothing.
+	err = c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupUnarchive, GroupID: g.ID, Text: "G"}, nil)
+	if !hasCode(err, ipc.CodeConflict) || !groupArchived(t, c, g.ID) {
+		t.Errorf("under a name that's taken: %v", err)
+	}
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupUnarchive, GroupID: g.ID, Text: "G 2", Flag: true})
+	if back := groupByID(t, c, g.ID); groupArchived(t, c, g.ID) || back.Name != "G 2" || archivedCount(t, c, "a") != 0 {
+		t.Errorf("under a new name: %+v", back)
+	}
+}
+
+// A group's color is a theme color, its bright version, a fixed color or
+// #RRGGBB; anything else is refused (PAN-190).
+func TestGroupColorsAreChecked(t *testing.T) {
+	p := testPaths(t)
+	start(t, p)
+	c := dial(t, p)
+	g := newGroup(t, c, ipc.Mutation{Text: "A", Color: "Orange"})
+	if g.Color != "fixed-orange" {
+		t.Errorf("a fixed color's name: %q", g.Color)
+	}
+	for in, want := range map[string]string{"bright-cyan": "bright-cyan", "red": "red", "fixed-red": "fixed-red", "#a1b2c3": "#A1B2C3"} {
+		mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupColor, GroupID: g.ID, Color: in})
+		if got := groupByID(t, c, g.ID).Color; got != want {
+			t.Errorf("%s: stored %q, want %q", in, got, want)
+		}
+	}
+	for _, bad := range []string{"chartreuse", "#12345", "#ggg000", "bright-orange", ""} {
+		if err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupColor, GroupID: g.ID, Color: bad}, nil); !hasCode(err, ipc.CodeInvalid) {
+			t.Errorf("%q: want invalid, got %v", bad, err)
+		}
+	}
+	if err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "B", Color: "mauve"}, nil); !hasCode(err, ipc.CodeInvalid) {
+		t.Errorf("create with a bad color: %v", err)
+	}
+	// New groups take the theme's 12 in turn.
+	for i := 1; i < 13; i++ {
+		got := newGroup(t, c, ipc.Mutation{Text: fmt.Sprint("n", i)}).Color
+		if want := core.ThemeColors[i%12]; got != want {
+			t.Errorf("group %d: %q, want %q", i, got, want)
+		}
 	}
 }

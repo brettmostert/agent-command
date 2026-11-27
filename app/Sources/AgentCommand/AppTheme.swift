@@ -34,7 +34,11 @@ struct AppTheme {
     var magenta: Color { ansi(5) }
     var cyan: Color { ansi(6) }
 
-    private func ansi(_ index: Int) -> Color { Color(nsColor: palette[index]) }
+    private func ansi(_ index: Int) -> Color { Color(nsColor: ansiColor(index)) }
+
+    /// The theme's ANSI colour at index (0–15); the foreground if the theme
+    /// has fewer.
+    func ansiColor(_ index: Int) -> NSColor { palette.indices.contains(index) ? palette[index] : foreground }
 
     private func mix(_ amount: CGFloat) -> NSColor {
         foreground.blended(withFraction: amount, of: background) ?? foreground

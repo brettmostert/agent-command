@@ -408,8 +408,11 @@ func newMoveCmd() *cobra.Command {
 				if noGroup {
 					return c.mutate(ipc.Mutation{Kind: ipc.MutMove, Targets: ids, Host: host}, nil)
 				}
-				g, err := resolveGroupOn(snap, groupName, host)
+				g, err := liveGroupOn(snap, groupName, host)
 				if err != nil {
+					if errors.As(err, new(archivedGroupError)) {
+						return err
+					}
 					if !create {
 						return fmt.Errorf("%w (use --create to create it)", err)
 					}

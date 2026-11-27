@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 archiveGroup: { [weak self] group in self?.archiveGroup(group.key) },
                 deleteGroup: { [weak self] group in self?.deleteGroup(group.key) }
             ))
+        store.onUnarchiveClash = { [weak self] group, sessions, name in self?.askUnarchiveName(group, sessions: sessions, suggested: name) }
         let split = NSSplitViewController()
         split.splitView = ThemedSplitView()
         split.splitView.isVertical = true
@@ -536,6 +537,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         showPopup(GroupNameView(title: title, close: { [weak self] in self?.closePopup() }) { [weak self] name in
             self?.store.createGroup(name, moving: sessions.map(\.id))
             self?.store.clearMarks()
+            self?.closePopup()
+        })
+    }
+
+    /// Another group has taken an archived group's name: ask for a new one,
+    /// with a free one filled in, and bring it back under that.
+    private func askUnarchiveName(_ group: SessionGroup, sessions: Bool, suggested: String) {
+        closePopup()
+        showPopup(GroupNameView(title: "\(group.name) is taken: unarchive it as", name: suggested,
+                                close: { [weak self] in self?.closePopup() }) { [weak self] name in
+            self?.store.unarchiveGroup(group.key, sessions: sessions, as: name)
             self?.closePopup()
         })
     }

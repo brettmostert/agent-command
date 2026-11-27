@@ -196,7 +196,12 @@ final class SessionStore {
         guard focused != sidebarFocused else { return }
         sidebarFocused = focused
         markedIDs = []
-        if focused { cursorID = selectedGroupKey.map(SidebarLayout.headerID) ?? selectedID ?? cursorIDs.first }
+        // With nothing selected, the first session: a header would select
+        // its group just by taking the keyboard. ↑ still reaches it.
+        if focused {
+            cursorID = selectedGroupKey.map(SidebarLayout.headerID) ?? selectedID
+                ?? SidebarLayout.sessionIDs(sidebarRows).first ?? cursorIDs.first
+        }
     }
 
     /// What the cursor stops on: group headers and the sessions you can see.
@@ -698,13 +703,26 @@ final class SessionStore {
     }
 
     /// Brings an archived group back, and with sessions its sessions too, paused.
-    func unarchiveGroup(_ key: String, sessions: Bool) {
+    /// Brings an archived group back, under name if it's given. When another
+    /// group has taken its name, onUnarchiveClash asks for a new one.
+    func unarchiveGroup(_ key: String, sessions: Bool, as name: String? = nil) {
         guard let group = allGroups.first(where: { $0.key == key }), group.isArchived else { return }
-        mutateGroup(GroupMutation(kind: "group.unarchive", on: group.host, group_id: group.id, flag: sessions ? true : nil),
-                    failure: "Couldn't unarchive the group")
+        let m = GroupMutation(kind: "group.unarchive", on: group.host, group_id: group.id, text: name, flag: sessions ? true : nil)
+        queued("") { conn in try conn.send("mutate", m) } done: { result in
+            guard case .failure(let error) = result else { return }
+            if (error as? DaemonError)?.code == "conflict", let ask = self.onUnarchiveClash {
+                let taken = self.groups.filter { $0.host == group.host }.map(\.name)
+                ask(group, sessions, SessionGroup.freeName(name ?? group.name, taken: taken))
+            } else {
+                self.problem = "Couldn't unarchive the group: \(error.localizedDescription)"
+            }
+        }
     }
 
-    /// The sessions a group's archive takes: those in it now.
+    /// Asks for a new name for a group whose own is taken: the group, whether
+    /// its sessions come back too, and a name that's free.
+    var onUnarchiveClash: ((SessionGroup, Bool, String) -> Void)?
+
     /// The sessions a group's archive or delete takes: those in it and in the
     /// groups inside it.
     func members(ofGroup key: String) -> [Session] {
