@@ -20,13 +20,10 @@ const sessionCols = `id, name, description, group_id, name_source, cwd, claude_s
 const sessionReadCols = sessionCols + `, set_id, set_order, status_since`
 
 // CreateSession inserts a new session. An empty ID gets a new ULID, an empty
-// GroupID the Default group, and a zero CreatedAt the current time.
+// GroupID no group, and a zero CreatedAt the current time.
 func (s *Store) CreateSession(ctx context.Context, sess *core.Session) error {
 	if sess.ID == "" {
 		sess.ID = NewID()
-	}
-	if sess.GroupID == "" {
-		sess.GroupID = DefaultGroupID
 	}
 	if sess.NameSource == "" {
 		sess.NameSource = core.NameAuto
@@ -181,15 +178,17 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 // session in a set takes the whole set with it.
 func (s *Store) MoveSessions(ctx context.Context, groupID string, ids ...string) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		if err := liveGroupExists(ctx, tx, groupID); err != nil {
-			return err
+		if groupID != "" { // "" takes them out of their group
+			if err := liveGroupExists(ctx, tx, groupID); err != nil {
+				return err
+			}
 		}
 		ids, err := withSets(ctx, tx, ids)
 		if err != nil {
 			return err
 		}
 		for _, id := range ids {
-			res, err := tx.ExecContext(ctx, `UPDATE sessions SET group_id = ? WHERE id = ?`, groupID, id)
+			res, err := tx.ExecContext(ctx, `UPDATE sessions SET group_id = ? WHERE id = ?`, groupRef(groupID), id)
 			if err != nil {
 				return err
 			}
@@ -228,7 +227,7 @@ func sessionArgs(sess *core.Session) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []any{sess.ID, sess.Name, sess.Description, sess.GroupID, string(sess.NameSource), sess.Cwd,
+	return []any{sess.ID, sess.Name, sess.Description, groupRef(sess.GroupID), string(sess.NameSource), sess.Cwd,
 		sess.ClaudeSessionID, string(hist), sess.TranscriptPath, string(sess.Status), sess.StatusDetail,
 		b2i(sess.Unseen), string(sess.Kind), sess.Pid,
 		ms(sess.CreatedAt), ms(sess.LastEventAt), ms(sess.ArchivedAt), sess.HarnessKind, sess.HarnessID, b2i(sess.Remote), sess.Host, sess.RemoteID, b2i(sess.HostGone), sess.JobID}, nil
@@ -244,8 +243,9 @@ func scanSession(row scanner) (*core.Session, error) {
 		unseen, remote, gone         int
 		created, lastEvent, archived int64
 		since                        int64
+		group                        sql.NullString
 	)
-	err := row.Scan(&sess.ID, &sess.Name, &sess.Description, &sess.GroupID, &nameSource, &sess.Cwd,
+	err := row.Scan(&sess.ID, &sess.Name, &sess.Description, &group, &nameSource, &sess.Cwd,
 		&sess.ClaudeSessionID, &hist, &sess.TranscriptPath, &status, &sess.StatusDetail, &unseen, &kind,
 		&sess.Pid, &created, &lastEvent, &archived, &sess.HarnessKind, &sess.HarnessID, &remote, &sess.Host, &sess.RemoteID, &gone, &sess.JobID,
 		&sess.SetID, &sess.SetOrder, &since)
@@ -255,6 +255,7 @@ func scanSession(row scanner) (*core.Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	sess.GroupID = group.String
 	sess.NameSource, sess.Status, sess.Kind = core.NameSource(nameSource), core.Status(status), core.Kind(kind)
 	sess.Unseen, sess.Remote, sess.HostGone = unseen != 0, remote != 0, gone != 0
 	sess.CreatedAt, sess.LastEventAt, sess.ArchivedAt = fromMS(created), fromMS(lastEvent), fromMS(archived)

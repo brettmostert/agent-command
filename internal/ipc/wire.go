@@ -20,10 +20,11 @@ type Session struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
-	// GroupID is its group. Parent is the set it's in, else its group; Order
-	// is its place in a set (from 1), 0 outside one.
-	GroupID    string          `json:"group_id"`
-	Parent     string          `json:"parent"`
+	// GroupID is its group; none when it's in no group. Parent is the set
+	// it's in, else its group, else none. Order is its place in a set (from
+	// 1), 0 outside one.
+	GroupID    string          `json:"group_id,omitempty"`
+	Parent     string          `json:"parent,omitempty"`
 	Order      int             `json:"order,omitempty"`
 	NameSource core.NameSource `json:"name_source,omitempty"`
 	Cwd        string          `json:"cwd"`
@@ -71,10 +72,8 @@ type Group struct {
 	Name string `json:"name"`
 	// Color is one of the color names (blue, magenta, cyan, yellow, green, red).
 	Color string `json:"color,omitempty"`
-	// Order is where you put it among the groups; Default has none, it's
-	// always last.
+	// Order is where you put it among the groups.
 	Order      int       `json:"order,omitempty"`
-	IsDefault  bool      `json:"is_default,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
 	ArchivedAt time.Time `json:"archived_at,omitzero"`
 	// Host is the Remote host a group is on, for a host's tree; "" for this
@@ -147,12 +146,8 @@ func SessionsOf(ss []*core.Session) []*Session {
 
 // GroupOf is g on the wire.
 func GroupOf(g *core.Group) *Group {
-	w := &Group{ID: g.ID, Type: "group", Host: g.Host, Name: g.Name, Color: g.Color, IsDefault: g.IsDefault,
+	return &Group{ID: g.ID, Type: "group", Host: g.Host, Name: g.Name, Color: g.Color, Order: g.SortKey,
 		CreatedAt: g.CreatedAt, ArchivedAt: g.ArchivedAt}
-	if !g.IsDefault {
-		w.Order = g.SortKey
-	}
-	return w
 }
 
 // GroupsOf is gs on the wire.
@@ -166,7 +161,7 @@ func GroupsOf(gs []*core.Group) []*Group {
 
 // Core is the group as internal/core has it; collapsed comes from the view.
 func (g *Group) Core(collapsed bool) *core.Group {
-	return &core.Group{ID: g.ID, Host: g.Host, Name: g.Name, Color: g.Color, SortKey: g.Order, IsDefault: g.IsDefault,
+	return &core.Group{ID: g.ID, Host: g.Host, Name: g.Name, Color: g.Color, SortKey: g.Order,
 		CreatedAt: g.CreatedAt, ArchivedAt: g.ArchivedAt, Collapsed: collapsed}
 }
 

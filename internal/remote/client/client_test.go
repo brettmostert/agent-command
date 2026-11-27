@@ -451,7 +451,7 @@ func TestTheHostsTree(t *testing.T) {
 	r.b.add(remoteSession("r1", "api"))
 	r.b.add(remoteSession("r2", "web"))
 	r.b.change(func() {
-		r.b.groups = []*core.Group{{ID: "g1", Name: "Backend", SortKey: 1}, {ID: "default", Name: "Default", IsDefault: true}}
+		r.b.groups = []*core.Group{{ID: "g1", Name: "Backend", SortKey: 1}, {ID: "g2", Name: "Docs", SortKey: 2}}
 		r.b.sets = []ipc.Set{{Type: ipc.EntitySet, ID: "set1", Parent: "g1"}, {Type: ipc.EntitySet, ID: "theirs", Parent: "g1", Host: "far"}}
 		r.b.inbox = []core.InboxItem{{ID: 7, SessionID: "r1", Kind: core.InboxQuestion, Text: "Which?", Options: []string{"a", "b"}, State: core.InboxOpen, At: t0}}
 		// One the host uses from yet another host: that host's to offer.

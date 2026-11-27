@@ -155,7 +155,11 @@ func listed(t *testing.T) []numbered {
 	var out []numbered
 	must(t, withClient(context.Background(), func(_ *client, snap snapshot) error {
 		for _, r := range filterRows(listRows(snap, snap.ViewState), snap, "", "") {
-			out = append(out, numbered{Number: r.Number, Name: r.Session.Name, Group: r.Group.Name})
+			group := ""
+			if r.Group != nil {
+				group = r.Group.Name
+			}
+			out = append(out, numbered{Number: r.Number, Name: r.Session.Name, Group: group})
 		}
 		return nil
 	}))
@@ -182,7 +186,7 @@ func names(rows []jsonRow) string {
 func TestListCommand(t *testing.T) {
 	env(t)
 	out := mustRun(t, "list")
-	for _, want := range []string{"#", "STATUS", "WHERE", "refactor auth middleware", "busy", "waiting", "api-server", "acmd", "Default"} {
+	for _, want := range []string{"#", "STATUS", "WHERE", "refactor auth middleware", "busy", "waiting", "api-server", "acmd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output missing %q:\n%s", want, out)
 		}
@@ -275,8 +279,8 @@ func TestGroupsMoveViewAndFocus(t *testing.T) {
 		t.Errorf("groups: %+v", rows)
 	}
 	out := mustRun(t, "group", "list")
-	if !strings.Contains(out, "PROJ-123 auth") || !strings.Contains(out, "billing") || strings.Index(out, "Default") < strings.Index(out, "billing") {
-		t.Errorf("group list (Default last):\n%s", out)
+	if !strings.Contains(out, "PROJ-123 auth") || !strings.Contains(out, "billing") || strings.Contains(out, "Default") {
+		t.Errorf("group list (no Default):\n%s", out)
 	}
 	mustRun(t, "group", "rename", "billing", "billing v2")
 	mustRun(t, "group", "color", "billing v2", "green")

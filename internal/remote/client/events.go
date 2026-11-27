@@ -42,8 +42,8 @@ func (t *tree) drop(typ, id string) {
 
 // apply follows one event, and returns a notice the host decided on now. Only
 // the host's own entities are kept: one it shows from yet another host has
-// that host's ids, which can be the same as its own (every Default is
-// "default"), and is that host's to offer.
+// that host's ids, which can be the same as its own, and is that host's to
+// offer.
 func (t *tree) apply(ev ipc.Event) *ipc.Notice {
 	if ev.Type == ipc.EventSnapshot && ev.Snapshot != nil {
 		*t = *newTree()

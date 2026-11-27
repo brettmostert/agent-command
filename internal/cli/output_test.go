@@ -16,11 +16,11 @@ import (
 func TestJSONIsTheOpsAnswer(t *testing.T) {
 	f := newFakeDaemon(t)
 	sessions := ipc.SessionsOf([]*core.Session{
-		{ID: "s1", Name: "api", Kind: core.KindHosted, Status: core.StatusPaused, GroupID: "default"},
-		{ID: "s2", Name: "old", Kind: core.KindHosted, Status: core.StatusArchived, GroupID: "default"},
+		{ID: "s1", Name: "api", Kind: core.KindHosted, Status: core.StatusPaused, GroupID: "g1"},
+		{ID: "s2", Name: "old", Kind: core.KindHosted, Status: core.StatusArchived},
 	})
 	job := &core.Job{ID: "j1", JobSpec: core.JobSpec{Name: "nightly", Schedule: "0 2 * * *", Where: core.WhereFolder, Cwd: "/w"}}
-	f.reply(ipc.OpSnapshot, ipc.Snapshot{Sessions: sessions, Groups: ipc.GroupsOf([]*core.Group{{ID: "default", Name: "Default", IsDefault: true}}),
+	f.reply(ipc.OpSnapshot, ipc.Snapshot{Sessions: sessions, Groups: ipc.GroupsOf([]*core.Group{{ID: "g1", Name: "Work"}}),
 		Jobs: []*core.Job{job}})
 	results := ipc.Results{Results: []ipc.Result{{ID: "s1", OK: true}}}
 	f.reply(ipc.OpMutate, results)
@@ -54,7 +54,8 @@ func TestJSONIsTheOpsAnswer(t *testing.T) {
 		{[]string{"describe", "s1", "fixes"}, results},
 		{[]string{"archive", "s1", "--yes"}, results},
 		{[]string{"finish", "s1", "--yes"}, results},
-		{[]string{"move", "s1", "Default"}, results},
+		{[]string{"move", "s1", "Work"}, results},
+		{[]string{"move", "s1", "--no-group"}, results},
 		{[]string{"sort", "name"}, results},
 		{[]string{"resume", "s1"}, resumed},
 		{[]string{"screen", "s1"}, screen},
@@ -66,7 +67,7 @@ func TestJSONIsTheOpsAnswer(t *testing.T) {
 		{[]string{"config", "show"}, cfg},
 		{[]string{"config", "set", "default_harness", "claude"}, cfg},
 		{[]string{"list"}, sessions[:1]},
-		{[]string{"group", "list"}, ipc.GroupsOf([]*core.Group{{ID: "default", Name: "Default", IsDefault: true}})},
+		{[]string{"group", "list"}, ipc.GroupsOf([]*core.Group{{ID: "g1", Name: "Work"}})},
 	} {
 		out := mustRun(t, append(c.args, "--json")...)
 		if !same(out, compact(c.want)) {

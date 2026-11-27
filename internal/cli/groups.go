@@ -28,8 +28,8 @@ func newGroupListCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withClient(cmd.Context(), func(_ *client, snap snapshot) error {
-				groups := []*ipc.Group{} // the daemon's, Default last
-				for _, g := range orderedGroups(snap.Groups) {
+				groups := []*ipc.Group{} // the daemon's, in order
+				for _, g := range snap.Groups {
 					if g.ArchivedAt.IsZero() || all {
 						for _, w := range snap.Snapshot.Groups {
 							if w.ID == g.ID {
@@ -49,7 +49,7 @@ func newGroupListCmd() *cobra.Command {
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 				fmt.Fprintln(tw, "GROUP\tCOLOR\tSESSIONS\tSTATE")
-				for _, g := range orderedGroups(snap.Groups) {
+				for _, g := range snap.Groups {
 					if !g.ArchivedAt.IsZero() && !all {
 						continue
 					}
@@ -68,19 +68,6 @@ func newGroupListCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "include archived groups")
 	return cmd
-}
-
-// orderedGroups returns groups in display order (Default last).
-func orderedGroups(groups []*core.Group) []*core.Group {
-	var out, def []*core.Group
-	for _, g := range groups {
-		if g.IsDefault {
-			def = append(def, g)
-		} else {
-			out = append(out, g)
-		}
-	}
-	return append(out, def...)
 }
 
 func newGroupCreateCmd() *cobra.Command {
@@ -137,7 +124,7 @@ func newGroupDeleteCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete <group>",
-		Short: "Delete a group; its sessions move to Default (nothing is archived)",
+		Short: "Delete a group, and archive its sessions (move out any to keep first)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
@@ -145,7 +132,10 @@ func newGroupDeleteCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(), yes, fmt.Sprintf("Delete group %q? Its sessions move to Default.", g.Name)); err != nil {
+				n, running := groupSessions(snap, g)
+				q := fmt.Sprintf("Delete group %q, and archive its %d session(s)? %d running session(s) will be stopped (conversations are kept).",
+					g.Name, n, running)
+				if err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(), yes, q); err != nil {
 					return err
 				}
 				return c.mutate(ipc.Mutation{Kind: ipc.MutGroupDelete, GroupID: g.ID, Host: g.Host}, nil)
@@ -168,18 +158,7 @@ func newGroupArchiveCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if g.IsDefault {
-					return errors.New("the Default group can't be archived")
-				}
-				n, running := 0, 0
-				for _, s := range snap.Sessions {
-					if s.GroupID == g.ID && s.Status != core.StatusArchived {
-						n++
-						if !s.Stopped() {
-							running++
-						}
-					}
-				}
+				n, running := groupSessions(snap, g)
 				q := fmt.Sprintf("Archive group %q and its %d session(s)? %d running session(s) will be stopped (conversations are kept).", g.Name, n, running)
 				if err := confirm(cmd.InOrStdin(), cmd.OutOrStdout(), yes, q); err != nil {
 					return err
@@ -190,6 +169,19 @@ func newGroupArchiveCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "don't ask for confirmation")
 	return cmd
+}
+
+// groupSessions counts g's live sessions, and the running ones among them.
+func groupSessions(snap snapshot, g *core.Group) (n, running int) {
+	for _, s := range snap.Sessions {
+		if s.GroupID == g.ID && s.Host == g.Host && s.Status != core.StatusArchived {
+			n++
+			if !s.Stopped() {
+				running++
+			}
+		}
+	}
+	return n, running
 }
 
 func newGroupUnarchiveCmd() *cobra.Command {

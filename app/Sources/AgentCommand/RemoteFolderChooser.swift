@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// The group a new session goes in: one that's there (nil: its host's
-/// Default), or one to make with this name.
+/// The group a new session goes in: one that's there (nil: no group), or one
+/// to make with this name.
 nonisolated enum NewSessionGroup: Equatable {
     case existing(SessionGroup?)
     case new(String)
@@ -11,19 +11,23 @@ nonisolated enum NewSessionGroup: Equatable {
 /// A line of ⇧⌘N's group list.
 nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     case group(SessionGroup)
+    /// No group: it isn't a group.
+    case none
     /// Make a group with the name typed: "" until there is one.
     case new(String)
 
     var id: String {
         switch self {
         case .group(let group): group.key
+        case .none: "none"
         case .new: "new"
         }
     }
 
     var title: String {
         switch self {
-        case .group(let group): group.isDefault ? "Default" : group.name
+        case .group(let group): group.name
+        case .none: "No group"
         case .new(let name): name.isEmpty ? "New group…" : "New group “\(name)”"
         }
     }
@@ -66,14 +70,14 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     /// What opens and closes the group list.
     static let groupKey = KeyCombo("cmd+g")
 
-    /// The chosen host's groups, Default last.
+    /// The chosen host's groups, in order.
     var hostGroups: [SessionGroup] { SidebarLayout.orderedGroups(groups).filter { $0.host == (host ?? "") } }
 
     /// The group line's text.
     var groupTitle: String {
         switch group {
-        case .existing(let group?): group.isDefault ? "Default" : group.name
-        case .existing(nil): "Default"
+        case .existing(let group?): group.name
+        case .existing(nil): "No group"
         case .new(let name): name + " (new)"
         }
     }
@@ -84,20 +88,21 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
         return nil
     }
 
-    /// The group list: the host's groups that match what's typed, then a new one.
+    /// The group list: the host's groups that match what's typed, no group
+    /// (while nothing's typed), then a new one.
     var groupRows: [NewSessionGroupRow] {
         let typed = groupSearch.trimmingCharacters(in: .whitespaces)
-        let shown = hostGroups.filter { typed.isEmpty || NewSessionGroupRow.group($0).title.localizedCaseInsensitiveContains(typed) }
-        let exact = shown.contains { NewSessionGroupRow.group($0).title.caseInsensitiveCompare(typed) == .orderedSame }
-        return shown.map(NewSessionGroupRow.group) + (exact ? [] : [.new(typed)])
+        let shown = hostGroups.filter { typed.isEmpty || $0.name.localizedCaseInsensitiveContains(typed) }
+        let exact = shown.contains { $0.name.caseInsensitiveCompare(typed) == .orderedSame }
+        return shown.map(NewSessionGroupRow.group) + (typed.isEmpty ? [.none] : []) + (exact ? [] : [.new(typed)])
     }
 
     func toggleGroups() {
         choosingGroup.toggle()
         groupSearch = ""
         if choosingGroup, case .existing(let current) = group {
-            let key = current?.key ?? hostGroups.first(where: \.isDefault)?.key
-            groupCursor = groupRows.firstIndex { $0.id == key } ?? 0
+            let id = current?.key ?? NewSessionGroupRow.none.id
+            groupCursor = groupRows.firstIndex { $0.id == id } ?? 0
         }
     }
 
@@ -111,6 +116,7 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     @discardableResult func pickGroup(_ row: NewSessionGroupRow) -> Bool {
         switch row {
         case .group(let picked): group = .existing(picked)
+        case .none: group = .existing(nil)
         case .new(let name):
             guard !name.isEmpty else { return false }
             group = .new(name)
@@ -137,8 +143,8 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     func setHost(_ name: String?) {
         host = name
         error = nil
-        // A group is on one host: on another, it's that host's Default. A new
-        // group is made where the session runs.
+        // A group is on one host: on another, it's no group. A new group is
+        // made where the session runs.
         if case .existing(let current?) = group, current.host != (name ?? "") { group = .existing(nil) }
         generation += 1
         guard let name else {

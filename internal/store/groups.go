@@ -12,7 +12,6 @@ import (
 
 // Errors for group rules.
 var (
-	ErrDefaultGroup  = errors.New("the Default group can't be renamed, deleted or archived")
 	ErrDuplicateName = errors.New("a group with that name already exists")
 	ErrEmptyName     = errors.New("group name is empty")
 )
@@ -20,10 +19,10 @@ var (
 // Palette is the round-robin color order for new groups.
 var Palette = []string{"blue", "magenta", "cyan", "yellow", "green", "red"}
 
-const groupCols = `id, name, color, sort_key, collapsed, is_default, created_at, archived_at`
+const groupCols = `id, name, color, sort_key, collapsed, created_at, archived_at`
 
 // CreateGroup adds a group. An empty color is assigned from Palette; new
-// groups sort after existing ones but before Default.
+// groups sort after existing ones.
 func (s *Store) CreateGroup(ctx context.Context, name, color string) (*core.Group, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -32,15 +31,15 @@ func (s *Store) CreateGroup(ctx context.Context, name, color string) (*core.Grou
 	g := &core.Group{ID: NewID(), Name: name, Color: color, CreatedAt: s.now().UTC()}
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var count, maxKey int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*), coalesce(max(sort_key), 0) FROM groups WHERE is_default = 0`).Scan(&count, &maxKey); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*), coalesce(max(sort_key), 0) FROM groups`).Scan(&count, &maxKey); err != nil {
 			return err
 		}
 		if g.Color == "" {
 			g.Color = Palette[count%len(Palette)]
 		}
 		g.SortKey = maxKey + 10
-		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?,?)`,
-			g.ID, g.Name, g.Color, g.SortKey, 0, 0, ms(g.CreatedAt), 0)
+		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?)`,
+			g.ID, g.Name, g.Color, g.SortKey, 0, ms(g.CreatedAt), 0)
 		return mapUnique(err)
 	})
 	if err != nil {
@@ -60,13 +59,13 @@ func (s *Store) GroupByName(ctx context.Context, name string) (*core.Group, erro
 		WHERE lower(name) = lower(?) AND archived_at = 0`, strings.TrimSpace(name)))
 }
 
-// Groups lists groups in display order (sort_key; Default last).
+// Groups lists groups in display order (sort_key).
 func (s *Store) Groups(ctx context.Context, includeArchived bool) ([]*core.Group, error) {
 	q := `SELECT ` + groupCols + ` FROM groups`
 	if !includeArchived {
 		q += ` WHERE archived_at = 0`
 	}
-	rows, err := s.q.QueryContext(ctx, q+` ORDER BY is_default, sort_key, created_at`)
+	rows, err := s.q.QueryContext(ctx, q+` ORDER BY sort_key, created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +81,13 @@ func (s *Store) Groups(ctx context.Context, includeArchived bool) ([]*core.Group
 	return out, rows.Err()
 }
 
-// RenameGroup renames a non-default group.
+// RenameGroup renames a group.
 func (s *Store) RenameGroup(ctx context.Context, id, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ErrEmptyName
 	}
-	return s.updateNonDefault(ctx, id, `UPDATE groups SET name = ? WHERE id = ?`, name, id)
+	return s.updateGroup(ctx, id, `UPDATE groups SET name = ? WHERE id = ?`, name, id)
 }
 
 // SetGroupColor changes a group's color.
@@ -103,17 +102,17 @@ func (s *Store) SetGroupCollapsed(ctx context.Context, id string, collapsed bool
 
 // SetGroupSortKey moves a group in the display order.
 func (s *Store) SetGroupSortKey(ctx context.Context, id string, key int) error {
-	return s.updateNonDefault(ctx, id, `UPDATE groups SET sort_key = ? WHERE id = ?`, key, id)
+	return s.updateGroup(ctx, id, `UPDATE groups SET sort_key = ? WHERE id = ?`, key, id)
 }
 
-// DeleteGroup removes a non-default group, moving its sessions to Default
-// first (deleting never archives anything).
+// DeleteGroup removes a group. Its sessions are left in no group: archiving
+// them first is the caller's job (it involves stopping them).
 func (s *Store) DeleteGroup(ctx context.Context, id string) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		if err := checkNonDefault(ctx, tx, id); err != nil {
+		if err := groupExists(ctx, tx, id); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET group_id = ? WHERE group_id = ?`, DefaultGroupID, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET group_id = NULL WHERE group_id = ?`, id); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `DELETE FROM groups WHERE id = ?`, id)
@@ -121,19 +120,19 @@ func (s *Store) DeleteGroup(ctx context.Context, id string) error {
 	})
 }
 
-// SetGroupArchived archives or unarchives a non-default group. Archiving
-// the group's sessions is the caller's job (it involves `claude stop`).
+// SetGroupArchived archives or unarchives a group. Archiving the group's
+// sessions is the caller's job (it involves stopping them).
 func (s *Store) SetGroupArchived(ctx context.Context, id string, archived bool) error {
 	at := int64(0)
 	if archived {
 		at = ms(s.now())
 	}
-	return s.updateNonDefault(ctx, id, `UPDATE groups SET archived_at = ? WHERE id = ?`, at, id)
+	return s.updateGroup(ctx, id, `UPDATE groups SET archived_at = ? WHERE id = ?`, at, id)
 }
 
-func (s *Store) updateNonDefault(ctx context.Context, id, q string, args ...any) error {
+func (s *Store) updateGroup(ctx context.Context, id, q string, args ...any) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
-		if err := checkNonDefault(ctx, tx, id); err != nil {
+		if err := groupExists(ctx, tx, id); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, q, args...)
@@ -152,19 +151,13 @@ func (s *Store) exec1(ctx context.Context, q string, args ...any) error {
 	return nil
 }
 
-func checkNonDefault(ctx context.Context, tx *sql.Tx, id string) error {
-	var isDefault int
-	err := tx.QueryRowContext(ctx, `SELECT is_default FROM groups WHERE id = ?`, id).Scan(&isDefault)
+func groupExists(ctx context.Context, tx *sql.Tx, id string) error {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM groups WHERE id = ?`, id).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	if err != nil {
-		return err
-	}
-	if isDefault == 1 {
-		return ErrDefaultGroup
-	}
-	return nil
+	return err
 }
 
 func liveGroupExists(ctx context.Context, tx *sql.Tx, id string) error {
@@ -192,17 +185,17 @@ func mapUnique(err error) error {
 func scanGroup(row scanner) (*core.Group, error) {
 	var (
 		g                   core.Group
-		collapsed, isDef    int
+		collapsed           int
 		created, archivedAt int64
 	)
-	err := row.Scan(&g.ID, &g.Name, &g.Color, &g.SortKey, &collapsed, &isDef, &created, &archivedAt)
+	err := row.Scan(&g.ID, &g.Name, &g.Color, &g.SortKey, &collapsed, &created, &archivedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	g.Collapsed, g.IsDefault = collapsed != 0, isDef != 0
+	g.Collapsed = collapsed != 0
 	g.CreatedAt, g.ArchivedAt = fromMS(created), fromMS(archivedAt)
 	return &g, nil
 }

@@ -27,7 +27,9 @@ extension UsesSharedSpeech {
 
         @Test func theFilterNarrowsTheSidebarAndItsKeys() throws {
             let s = try store()
-            #expect(s.sidebarIDs == ["a", "b", "c", "d"] && s.filterHosts == ["studio", "laptop"])
+            // Each machine's sessions stay together, under its own No group line:
+            // this Mac's, then each host's by name.
+            #expect(s.sidebarIDs == ["a", "b", "d", "c"] && s.filterHosts == ["studio", "laptop"])
             s.filter = .local
             #expect(s.sidebarIDs == ["a", "b"] && s.sessionID(number: 2) == "b" && s.sessionID(number: 3) == nil)
             #expect(SidebarFilter.load(s.defaults) == .local, "it's kept")

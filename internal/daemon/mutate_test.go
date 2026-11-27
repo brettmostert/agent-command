@@ -128,8 +128,8 @@ func TestArchiveRules(t *testing.T) {
 	}
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutUnarchive, Targets: ipc.Here(byClaude(snap, "run").ID)})
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupDelete, GroupID: g.ID})
-	if s := byClaude(snapshot(t, c), "grp"); s.GroupID != "default" {
-		t.Errorf("group delete should move sessions to Default: %+v", s)
+	if s := byClaude(snapshot(t, c), "grp"); s.GroupID != "" || s.Status != core.StatusArchived {
+		t.Errorf("group delete should archive its sessions, in no group: %+v", s)
 	}
 }
 

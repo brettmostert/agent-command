@@ -63,8 +63,6 @@
       "type": "session",
       "id": "s3",
       "name": "shell",
-      "group_id": "default",
-      "parent": "default",
       "cwd": "/w",
       "status": "done",
       "kind": "hosted",
@@ -84,8 +82,6 @@
       "type": "session",
       "id": "s4",
       "name": "build",
-      "group_id": "default",
-      "parent": "default",
       "cwd": "/r/build",
       "status": "done",
       "kind": "hosted",
@@ -105,7 +101,6 @@
       "type": "session",
       "id": "s5",
       "name": "lint",
-      "group_id": "",
       "parent": "f1",
       "cwd": "/w/api",
       "status": "done",
@@ -124,10 +119,10 @@
       "created_at": "2026-11-20T09:00:00Z"
     },
     {
-      "id": "default",
+      "id": "g2",
       "type": "group",
-      "name": "Default",
-      "is_default": true,
+      "name": "Docs",
+      "order": 20,
       "created_at": "2026-11-20T09:00:00Z"
     }
   ],

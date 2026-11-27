@@ -140,7 +140,11 @@ func writeListTable(w io.Writer, rows []listRow) error {
 		if r.Session.Unseen {
 			status += "•"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", num, status, r.Group.Name, display(r.Session.Name, 40),
+		group := "-" // in no group
+		if r.Group != nil {
+			group = r.Group.Name
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", num, status, group, display(r.Session.Name, 40),
 			filepath.Base(r.Session.Cwd), where(r.Session), age(r.Session))
 	}
 	return tw.Flush()
@@ -376,15 +380,21 @@ func newUnarchiveCmd() *cobra.Command {
 }
 
 func newMoveCmd() *cobra.Command {
-	var create bool
+	var create, noGroup bool
 	cmd := &cobra.Command{
-		Use:   "move <N|id|name-prefix>... <group>",
-		Short: "Move sessions to a group",
-		Args:  cobra.MinimumNArgs(2),
+		Use:   "move <N|id|name-prefix>... <group>|--no-group",
+		Short: "Move sessions to a group, or out of their group",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !noGroup && len(args) < 2 {
+				return usageError{errors.New("give the sessions and a group, or --no-group")}
+			}
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				groupName := args[len(args)-1]
-				ids, err := resolveSessions(snap, args[:len(args)-1])
+				sel, groupName := args, ""
+				if !noGroup {
+					sel, groupName = args[:len(args)-1], args[len(args)-1]
+				}
+				ids, err := resolveSessions(snap, sel)
 				if err != nil {
 					return err
 				}
@@ -394,6 +404,9 @@ func newMoveCmd() *cobra.Command {
 					if t.Host != host {
 						return usageError{fmt.Errorf("those sessions are on different hosts: move the sessions of one host at a time")}
 					}
+				}
+				if noGroup {
+					return c.mutate(ipc.Mutation{Kind: ipc.MutMove, Targets: ids, Host: host}, nil)
 				}
 				g, err := resolveGroupOn(snap, groupName, host)
 				if err != nil {
@@ -409,6 +422,7 @@ func newMoveCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&create, "create", false, "create the group if it doesn't exist")
+	cmd.Flags().BoolVar(&noGroup, "no-group", false, "take the sessions out of their group")
 	return cmd
 }
 

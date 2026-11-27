@@ -38,7 +38,7 @@ final class SessionStore {
     var jobs: [Job] = []
     /// Waking the Mac for jobs; nil when the daemon can't.
     var wake: WakeState?
-    /// The groups sessions can go in, Default last.
+    /// The groups sessions can go in, in order.
     var groups: [SessionGroup] = []
     /// Every group, archived ones too, for the Archived section.
     private(set) var allGroups: [SessionGroup] = []
@@ -171,7 +171,7 @@ final class SessionStore {
         if let key { options.focus(key, groups: groups) } else { options.clearFocus() }
     }
 
-    /// The group ⌘N starts a session in; nil is this Mac's Default.
+    /// The group ⌘N starts a session in; nil is no group.
     var newSessionGroup: SessionGroup? {
         SidebarLayout.newSessionGroup(selectedGroup: selectedGroupKey, selected: selected, focused: options.focused, groups: groups)
     }
@@ -685,7 +685,7 @@ final class SessionStore {
 
     /// Archives a group and its sessions; running ones stop.
     func archiveGroup(_ key: String) {
-        guard let group = group(key: key), !group.isDefault else { return }
+        guard let group = group(key: key) else { return }
         if selectedGroupKey == key { selectedGroupKey = nil }
         mutateGroup(GroupMutation(kind: "group.archive", on: group.host, group_id: group.id), failure: "Couldn't archive the group")
     }
@@ -711,19 +711,36 @@ final class SessionStore {
         mutateGroup(GroupMutation(kind: "group.color", on: group.host, group_id: group.id, color: color), failure: "Couldn't change the group's colour")
     }
 
-    /// Deletes a group; its sessions move to Default.
+    /// Deletes a group, and archives its sessions: to keep one, move it out first.
     func deleteGroup(_ key: String) {
         guard let group = group(key: key) else { return }
+        if selectedGroupKey == key { selectedGroupKey = nil }
         mutateGroup(GroupMutation(kind: "group.delete", on: group.host, group_id: group.id), failure: "Couldn't delete the group")
     }
 
-    /// Moves sessions to a group. A session in a set takes its set along. A
-    /// session stays on its own host: only those on the group's host move.
+    /// Moves sessions to a group, or out of theirs when key is a host's no
+    /// group (SidebarLayout.noGroupKey). A session in a set takes its set
+    /// along. A session stays on its own host: only those on that host move.
     func moveSessions(_ ids: [String], to key: String) {
-        guard let group = group(key: key) else { return }
-        let moving = targets(ids).filter { ($0.host ?? "") == group.host }
+        let host: String
+        let groupID: String?
+        if let noGroupHost = SidebarLayout.noGroupHost(key) {
+            (host, groupID) = (noGroupHost, nil)
+        } else if let group = group(key: key) {
+            (host, groupID) = (group.host, group.id)
+        } else {
+            return
+        }
+        let moving = targets(ids).filter { ($0.host ?? "") == host }
         guard !moving.isEmpty else { return }
-        mutateGroup(GroupMutation(kind: "session.move", on: group.host, group_id: group.id, targets: moving), failure: "Couldn't move the sessions")
+        mutateGroup(GroupMutation(kind: "session.move", on: host, group_id: groupID, targets: moving), failure: "Couldn't move the sessions")
+    }
+
+    /// Takes sessions out of their group: each to its own host's no group.
+    func moveToNoGroup(_ ids: [String]) {
+        for host in Set(targets(ids).map { $0.host ?? "" }) {
+            moveSessions(ids, to: SidebarLayout.noGroupKey(host))
+        }
     }
 
     /// Puts a group just before or just after another on its host.
@@ -739,7 +756,7 @@ final class SessionStore {
     /// Moves a group one place up or down among the groups you arranged on its host.
     func moveGroup(_ key: String, by step: Int) {
         guard let group = group(key: key) else { return }
-        let ordered = SidebarLayout.orderedGroups(groups).filter { !$0.isDefault && $0.host == group.host }
+        let ordered = SidebarLayout.orderedGroups(groups).filter { $0.host == group.host }
         guard let at = ordered.firstIndex(where: { $0.key == key }) else { return }
         let to = at + step
         guard ordered.indices.contains(to) else { return }
@@ -775,7 +792,7 @@ final class SessionStore {
     /// remote makes it a Remote session or not; nil, as from ⌘N, is the config's
     /// `new_sessions_remote`.
     /// setWith puts it in a set with that session, for a split.
-    /// group is the id of the group it goes in; nil is Default.
+    /// group is the id of the group it goes in; nil is no group.
     func newSession(harness: Harness, in folder: String, remote: Bool? = nil, setWith: String? = nil, group: String? = nil,
                     placed: ((Session) -> Void)? = nil) {
         nonisolated struct New: Encodable {

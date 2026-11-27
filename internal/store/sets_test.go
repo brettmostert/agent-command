@@ -256,19 +256,19 @@ func TestMovingOneMemberMovesTheSet(t *testing.T) {
 	// A stale write of one member can't take it out of its set's group.
 	a, err := s.Session(ctx, ids[0])
 	must(t, err)
-	a.GroupID = DefaultGroupID
+	a.GroupID = ""
 	must(t, s.UpdateSession(ctx, a))
 	if a, _ = s.Session(ctx, ids[0]); a.GroupID != g.ID {
 		t.Errorf("UpdateSession split the set across groups: a is in %s", a.GroupID)
 	}
 
-	// Deleting the group moves the whole set to Default, together.
+	// Deleting the group leaves the whole set in no group, together.
 	must(t, s.DeleteGroup(ctx, g.ID))
 	if got := members(t, s, set.ID); got != "a,b" {
 		t.Errorf("after deleting the group: %q, want a,b", got)
 	}
-	if got, _ := s.Set(ctx, set.ID); got.GroupID != DefaultGroupID {
-		t.Errorf("the set is in %s, want Default", got.GroupID)
+	if got, _ := s.Set(ctx, set.ID); got.GroupID != "" {
+		t.Errorf("the set is in %s, want no group", got.GroupID)
 	}
 }
 

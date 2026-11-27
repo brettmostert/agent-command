@@ -6,7 +6,7 @@ import Testing
 // The sidebar is built from the daemon's structure (groups, sets) and this app's
 // own options (D2): grouping, sort, collapse and the numbers are the app's.
 
-private func session(_ id: String, group: String = "default", name: String? = nil, status: String = "done",
+private func session(_ id: String, group: String? = nil, name: String? = nil, status: String = "done",
                      cwd: String = "/tmp", activity: String? = nil) throws -> Session {
     var s = try makeSession(id: id, name: name ?? id, cwd: cwd, status: status)
     s.groupID = group
@@ -15,7 +15,6 @@ private func session(_ id: String, group: String = "default", name: String? = ni
 }
 
 private let groups = [
-    SessionGroup(id: "default", name: "Default", isDefault: true),
     SessionGroup(id: "web", name: "web", color: "green", order: 20),
     SessionGroup(id: "api", name: "api", color: "blue", order: 10),
     SessionGroup(id: "old", name: "old", archivedAt: "2026-11-01T00:00:00Z", order: 5),
@@ -26,24 +25,24 @@ private func render(_ rows: [SidebarRow]) -> String {
     rows.map { row in
         switch row {
         case .header(let h): "[\(h.group.name)\(h.collapsed ? "+" : "")]"
+        case .noGroup(let h): "[\(h.title)]"
         case .session(let s, _): s.id
         }
     }.joined(separator: " ")
 }
 
-@Test func groupsShowInTheOrderYouArrangedThemWithDefaultLast() throws {
+@Test func groupsShowInTheOrderYouArrangedThemThenNoGroup() throws {
     let sessions = try [session("a", group: "web"), session("b"), session("c", group: "api"), session("d", group: "old")]
     let rows = SidebarLayout.rows(sessions: sessions, groups: groups, sets: [], options: SidebarOptions())
-    // d's group is archived: it shows in Default. An empty group still shows, to drop into.
-    #expect(render(rows) == "[api] c [web] a [Default] b d")
+    // d's group is archived: it's in no group. An empty group still shows, to drop into.
+    #expect(render(rows) == "[api] c [web] a [No group] b d")
     let empty = SidebarLayout.rows(sessions: try [session("a", group: "web")], groups: groups, sets: [], options: SidebarOptions())
-    #expect(render(empty) == "[api] [web] a", "Default with nothing in it is left out")
+    #expect(render(empty) == "[api] [web] a", "no No group line with nothing in it")
 }
 
-@Test func withOnlyDefaultOrInListModeThereAreNoHeaders() throws {
+@Test func withNoGroupsOrInListModeThereAreNoHeaders() throws {
     let sessions = try [session("a", group: "web"), session("b")]
-    let onlyDefault = [groups[0]]
-    #expect(render(SidebarLayout.rows(sessions: sessions, groups: onlyDefault, sets: [], options: SidebarOptions())) == "a b")
+    #expect(render(SidebarLayout.rows(sessions: sessions, groups: [], sets: [], options: SidebarOptions())) == "a b")
     var list = SidebarOptions()
     list.mode = .list
     #expect(render(SidebarLayout.rows(sessions: sessions, groups: groups, sets: [], options: list)) == "a b")
@@ -54,14 +53,14 @@ private func render(_ rows: [SidebarRow]) -> String {
     var options = SidebarOptions()
     options.collapsed = ["api"]
     let rows = SidebarLayout.rows(sessions: sessions, groups: groups, sets: [], options: options)
-    #expect(render(rows) == "[api+] [web] [Default] b")
+    #expect(render(rows) == "[api+] [web] [No group] b")
     guard case .header(let header) = rows[0] else { Issue.record("no header"); return }
     #expect(header.count == 2 && header.urgent?.reason == "waiting")
     #expect(SidebarLayout.sessionIDs(rows) == ["b"], "a collapsed group's sessions aren't numbered")
 
     // While filtering, matches show even in a collapsed group, and empty groups go.
     let filtered = SidebarLayout.rows(sessions: sessions, groups: groups, sets: [], options: options, filtering: true)
-    #expect(render(filtered) == "[api] a w [Default] b")
+    #expect(render(filtered) == "[api] a w [No group] b")
 }
 
 @Test func eachSortKeepsTiesInCreationOrder() throws {
@@ -86,7 +85,7 @@ private func render(_ rows: [SidebarRow]) -> String {
     let sessions = try [session("a", name: "c"), session("b", name: "a"), session("x", name: "b")]
     var options = SidebarOptions()
     options.sort = .name
-    let rows = SidebarLayout.rows(sessions: sessions, groups: [groups[0]], sets: [["a", "b"]], options: options)
+    let rows = SidebarLayout.rows(sessions: sessions, groups: [], sets: [["a", "b"]], options: options)
     // By name: b (a), x (b), a (c). The set a,b goes where b sorts, in the set's order.
     #expect(render(rows) == "a b x")
     let links: [SetLink] = rows.compactMap { if case .session(_, let link) = $0 { link } else { nil } }
@@ -123,6 +122,8 @@ private func render(_ rows: [SidebarRow]) -> String {
             "a marked session takes the other marked ones")
     #expect(SidebarDrop.action(items: [item], onto: "api", groups: groups, marked: ["z"]) == .moveSessions(["a"], to: "api"),
             "an unmarked one goes alone")
+    #expect(SidebarDrop.action(items: [item], onto: SidebarLayout.noGroupKey(""), groups: groups) == .moveSessions(["a"], to: "nogroup:"),
+            "onto No group: out of their group")
     #expect(SidebarDrop.action(items: [], onto: "api", groups: groups) == nil)
     #expect(SidebarDrop.action(items: ["file:///x"], onto: "api", groups: groups) == nil)
 }
@@ -130,11 +131,12 @@ private func render(_ rows: [SidebarRow]) -> String {
 @Test func droppingAGroupOnAnotherPutsItBeforeIt() {
     let web = SidebarDrop.groupItem("web")
     #expect(SidebarDrop.action(items: [web], onto: "api", groups: groups) == .moveGroup("web", before: "api", after: nil))
-    #expect(SidebarDrop.action(items: [SidebarDrop.groupItem("api")], onto: "default", groups: groups)
-            == .moveGroup("api", before: nil, after: "web"), "onto Default: after the last group")
-    #expect(SidebarDrop.action(items: [web], onto: "default", groups: groups) == nil, "already last")
+    let noGroup = SidebarLayout.noGroupKey("")
+    #expect(SidebarDrop.action(items: [SidebarDrop.groupItem("api")], onto: noGroup, groups: groups)
+            == .moveGroup("api", before: nil, after: "web"), "onto No group: after the last group")
+    #expect(SidebarDrop.action(items: [web], onto: noGroup, groups: groups) == nil, "already last")
+    #expect(SidebarDrop.action(items: [web], onto: SidebarLayout.noGroupKey("studio"), groups: groups) == nil, "another host's")
     #expect(SidebarDrop.action(items: [web], onto: "web", groups: groups) == nil, "onto itself")
-    #expect(SidebarDrop.action(items: [SidebarDrop.groupItem("default")], onto: "api", groups: groups) == nil, "Default stays last")
     #expect(SidebarDrop.action(items: [web], onto: "nope", groups: groups) == nil)
 }
 
@@ -249,75 +251,83 @@ extension UsesSharedSpeech {
     #expect(Set(rows.map(\.id)).count == rows.count)
 }
 
-/// A host's tree comes after this Mac's groups, as the host arranges it: its
-/// groups named with the host, its Default as the host itself, and its sessions
-/// only ever in its own groups.
+/// A host's tree comes after this Mac's, as the host arranges it: its groups
+/// named with the host, then its own "No group" line, and its sessions only
+/// ever in its own groups.
 @Test func eachHostsTreeFollowsThisMacsGroups() throws {
     let groups = [
-        SessionGroup(id: "default", name: "Default", isDefault: true),
         SessionGroup(id: "mine", name: "Mine", order: 1),
-        SessionGroup(id: "s-default", name: "Default", isDefault: true, host: "studio"),
         SessionGroup(id: "s-api", name: "API", order: 2, host: "studio"),
         SessionGroup(id: "b-ops", name: "Ops", order: 1, host: "box"),
     ]
     var onStudio = try makeRemoteSession(id: "h1", host: "studio")
     onStudio.groupID = "s-api"
     var lost = try makeRemoteSession(id: "h2", host: "studio")
-    lost.groupID = "gone" // a group the host no longer has: its own Default
+    lost.groupID = "gone" // a group the host no longer has: in no group, on its host
     var onBox = try makeRemoteSession(id: "h3", host: "box")
     onBox.groupID = "b-ops"
-    let rows = SidebarLayout.rows(sessions: [try session("a", group: "mine"), onStudio, lost, onBox], groups: groups, sets: [],
-                                  options: SidebarOptions())
+    let rows = SidebarLayout.rows(sessions: [try session("a", group: "mine"), try session("loose"), onStudio, lost, onBox], groups: groups,
+                                  sets: [], options: SidebarOptions())
     let titles = rows.compactMap { row -> String? in
-        if case .header(let h) = row { return h.group.title }
-        return nil
+        switch row {
+        case .header(let h): h.group.title
+        case .noGroup(let h): h.title
+        case .session: nil
+        }
     }
-    #expect(titles == ["Mine", "Ops · box", "API · studio", "studio"])
-    #expect(SidebarLayout.sessionIDs(rows) == ["a", "h3", "h1", "h2"])
-    #expect(SidebarLayout.groups(for: onStudio, in: groups).map(\.id) == ["s-api", "s-default"], "only its host's groups")
-    #expect(SidebarLayout.groups(for: try session("a"), in: groups).map(\.id) == ["mine", "default"])
+    #expect(titles == ["Mine", "No group", "Ops · box", "API · studio", "No group · studio"])
+    #expect(SidebarLayout.sessionIDs(rows) == ["a", "loose", "h3", "h1", "h2"])
+    #expect(!SidebarLayout.cursorIDs(rows).contains { $0.hasPrefix("nogroup:") }, "the cursor passes No group by")
+    #expect(SidebarLayout.groups(for: onStudio, in: groups).map(\.id) == ["s-api"], "only its host's groups")
+    #expect(SidebarLayout.groups(for: try session("a"), in: groups).map(\.id) == ["mine"])
     let g: SessionGroup = try JSONDecoder().decode(SessionGroup.self, from: Data(#"{"id":"x","name":"N","host":"studio"}"#.utf8))
     #expect(g.host == "studio" && g.title == "N · studio")
-    // Moving a host's sessions offers only that host's groups.
+    // Moving a host's sessions offers only that host's groups, and no group.
     let entries = Palette.groupEntries([onStudio], section: "s", groups: groups).map(\.title)
-    #expect(entries.contains("Move to studio") && !entries.contains("Move to Mine") && !entries.contains { $0.contains("box") })
+    #expect(entries.contains("Move to No Group") && !entries.contains("Move to Mine") && !entries.contains { $0.contains("box") })
+    #expect(!Palette.groupEntries([lost], section: "s", groups: groups).map(\.title).contains("Move to No Group"),
+            "not for a session that's in no group")
 }
 
-// A host's groups have their host's ids, and every host's Default is
-// "default": the app tells them apart by key, and names the host in ops.
+// A host's groups have their host's ids: the app tells them apart by key, and
+// names the host in ops. No group is each machine's own too.
 extension UsesSharedSpeech.GroupCallsTests {
-    @Test func aHostsDefaultIsNotThisMacs() async throws {
+    @Test func aHostsNoGroupIsNotThisMacs() async throws {
         let daemon = try FakeDaemon()
         defer { daemon.stop() }
         let store = SessionStore()
-        let mine = SessionGroup(id: "default", name: "Default", isDefault: true)
-        let theirs = SessionGroup(id: "default", name: "Default", isDefault: true, host: "studio")
+        let mine = SessionGroup(id: "g", name: "Work")
+        let theirs = SessionGroup(id: "g", name: "Work", host: "studio")
         store.groups = [mine, theirs]
         var here = try makeSession(id: "a")
-        here.groupID = "other"
+        here.groupID = "g"
         var there = try makeRemoteSession(id: "h", host: "studio")
-        there.groupID = "other"
+        there.groupID = "g"
         store.sessions = [here, there]
         #expect(mine.key != theirs.key && store.group(key: theirs.key)?.host == "studio")
-        store.moveSessions(["a", "h"], to: mine.key) // only this Mac's moves into this Mac's
-        store.moveSessions(["a", "h"], to: theirs.key) // only studio's into studio's
-        let all = try await sent(daemon, count: 2)
-        #expect(targetIDs(all[0]) == ["a"] && all[0]["host"] == nil && all[0]["group_id"] as? String == "default")
-        #expect(targetIDs(all[1]) == ["h"] && targetHosts(all[1]) == ["studio"] && all[1]["host"] as? String == "studio")
+        store.moveSessions(["a", "h"], to: SidebarLayout.noGroupKey("")) // only this Mac's leaves
+        store.moveSessions(["a", "h"], to: SidebarLayout.noGroupKey("studio")) // only studio's
+        store.moveToNoGroup(["a", "h"]) // each on its own host
+        let all = try await sent(daemon, count: 4)
+        #expect(targetIDs(all[0]) == ["a"] && all[0]["host"] == nil && all[0]["group_id"] == nil)
+        #expect(targetIDs(all[1]) == ["h"] && targetHosts(all[1]) == ["studio"] && all[1]["host"] as? String == "studio" && all[1]["group_id"] == nil)
+        #expect(Set(all[2...].map { $0["host"] as? String ?? "" }) == ["", "studio"])
+        store.moveSessions(["a"], to: "nope") // not a group: nothing
 
-        // The sidebar: each Default shows its own machine's sessions.
-        here.groupID = "default"
-        there.groupID = "default"
+        // The sidebar: each machine's No group shows its own sessions.
+        here.groupID = nil
+        there.groupID = nil
         let rows = SidebarLayout.rows(sessions: [here, there], groups: [mine, theirs], sets: [], options: SidebarOptions())
         var under: [String: [String]] = [:]
         var current = ""
         for row in rows {
             switch row {
             case .header(let h): current = h.group.key
+            case .noGroup(let h): current = h.dropKey
             case .session(let s, _): under[current, default: []].append(s.id)
             }
         }
-        #expect(under[mine.key] == ["a"] && under[theirs.key] == ["h"])
+        #expect(under["nogroup:"] == ["a"] && under["nogroup:studio"] == ["h"])
         #expect(Set(rows.map(\.id)).count == rows.count, "every row its own id")
     }
 }
@@ -330,9 +340,9 @@ extension UsesSharedSpeech.GroupCallsTests {
     options.collapsed = ["web"]
     options.focus("api", groups: groups)
     #expect(options.focused == "api" && options.mode == .groups)
-    #expect(options.collapsed == ["default", "web", "old"], "every other group collapses")
+    #expect(options.collapsed == ["web", "old"], "every other group collapses")
     options.focus("web", groups: groups)
-    #expect(options.collapsed == ["default", "api", "old"] && options.beforeFocus == ["web"], "focusing another keeps what was before")
+    #expect(options.collapsed == ["api", "old"] && options.beforeFocus == ["web"], "focusing another keeps what was before")
     options.clearFocus()
     #expect(options.focused == nil && options.beforeFocus == nil && options.collapsed == ["web"])
     options.clearFocus()
@@ -362,7 +372,7 @@ extension UsesSharedSpeech.GroupCallsTests {
 
 @Test func theCursorStopsOnHeadersAndSessions() throws {
     let rows = SidebarLayout.rows(sessions: try [session("a", group: "web"), session("b")], groups: groups, sets: [], options: SidebarOptions())
-    #expect(SidebarLayout.cursorIDs(rows) == ["group:api", "group:web", "a", "group:default", "b"])
+    #expect(SidebarLayout.cursorIDs(rows) == ["group:api", "group:web", "a", "b"], "No group isn't a stop")
     #expect(SidebarLayout.sessionIDs(rows) == ["a", "b"], "numbers count only sessions")
     #expect(SidebarLayout.groupKey(cursor: SidebarLayout.headerID("web")) == "web" && SidebarLayout.groupKey(cursor: "a") == nil)
 }
@@ -375,23 +385,24 @@ extension UsesSharedSpeech.GroupCallsTests {
     #expect(group("api", inWeb, "web") == "api")
     #expect(group(nil, inWeb, "api") == "web")
     #expect(group(nil, nil, "api") == "api")
-    #expect(group(nil, nil, nil) == nil, "nothing: this Mac's Default")
+    #expect(group(nil, nil, nil) == nil, "nothing: no group")
     #expect(group("old", nil, nil) == nil, "an archived group isn't one to start in")
-    #expect(group(nil, try session("b"), "api") == "default", "a session in Default starts in Default")
+    #expect(group(nil, try session("b"), "api") == nil, "a session in no group starts in no group")
     let onStudio = SessionGroup(id: "g", name: "ops", host: "studio")
     let found = SidebarLayout.newSessionGroup(selectedGroup: onStudio.key, selected: nil, focused: nil, groups: groups + [onStudio])
     #expect(found == onStudio, "a host's group, for a session on that host")
 }
 
 @Test func theArchivedSectionShowsEachSessionUnderItsGroup() throws {
-    func archived(_ id: String, _ group: String) throws -> Session { try session(id, group: group, status: "archived") }
+    func archived(_ id: String, _ group: String?) throws -> Session { try session(id, group: group, status: "archived") }
     let empty = SessionGroup(id: "gone", name: "gone", archivedAt: "2026-11-02T00:00:00Z", order: 1)
     let sections = SidebarLayout.archivedSections(
-        sessions: try [archived("c", "old"), archived("b", "default"), archived("a", "web"), archived("d", "nowhere")],
+        sessions: try [archived("c", "old"), archived("b", nil), archived("a", "web"), archived("d", "nowhere")],
         groups: groups + [empty])
-    // Live and archived groups, in their order, Default last; an archived group
-    // shows even with nothing in it, to bring it back. One whose group is gone is in Default.
-    #expect(sections.map(\.group.id) == ["gone", "old", "web", "default"])
+    // Live and archived groups, in their order, then no group; an archived group
+    // shows even with nothing in it, to bring it back. One whose group is gone is in no group.
+    #expect(sections.map(\.title) == ["gone", "old", "web", "No group"])
     #expect(sections.map { $0.sessions.map(\.id) } == [[], ["c"], ["a"], ["b", "d"]])
+    #expect(sections.last?.group == nil && sections.last?.id == "nogroup:")
     #expect(SidebarLayout.archivedSections(sessions: [], groups: groups).map(\.id) == ["old"])
 }

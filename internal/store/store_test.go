@@ -43,9 +43,8 @@ func TestOpenMigratesAndReopens(t *testing.T) {
 	if perm := st.Mode().Perm(); perm != 0o600 && runtime.GOOS != "windows" {
 		t.Errorf("db permissions = %o, want 600", perm)
 	}
-	g, err := s.Group(ctx, DefaultGroupID)
-	if err != nil || !g.IsDefault || g.Name != "Default" {
-		t.Fatalf("default group: %+v %v", g, err)
+	if gs, err := s.Groups(ctx, true); err != nil || len(gs) != 0 {
+		t.Fatalf("a new store has no groups (sessions start in no group): %+v %v", gs, err)
 	}
 	s.Close()
 
@@ -170,7 +169,7 @@ func TestSessionRoundTrip(t *testing.T) {
 	if err := s.CreateSession(ctx, in); err != nil {
 		t.Fatal(err)
 	}
-	if in.ID == "" || in.GroupID != DefaultGroupID || in.NameSource != core.NameAuto || in.CreatedAt.IsZero() {
+	if in.ID == "" || in.GroupID != "" || in.NameSource != core.NameAuto || in.CreatedAt.IsZero() {
 		t.Fatalf("defaults not applied: %+v", in)
 	}
 	got, err := s.Session(ctx, in.ID)
@@ -279,18 +278,18 @@ func TestGroups(t *testing.T) {
 	for _, g := range list {
 		order = append(order, g.Name)
 	}
-	if strings.Join(order, "|") != "PROJ-123 auth|billing|custom color|Default" {
-		t.Errorf("order = %v (Default must be last)", order)
+	if strings.Join(order, "|") != "PROJ-123 auth|billing|custom color" {
+		t.Errorf("order = %v", order)
 	}
 
-	// Default group rules.
+	// A group that isn't there.
 	for name, err := range map[string]error{
-		"rename":  s.RenameGroup(ctx, DefaultGroupID, "x"),
-		"delete":  s.DeleteGroup(ctx, DefaultGroupID),
-		"archive": s.SetGroupArchived(ctx, DefaultGroupID, true),
+		"rename":  s.RenameGroup(ctx, "nope", "x"),
+		"delete":  s.DeleteGroup(ctx, "nope"),
+		"archive": s.SetGroupArchived(ctx, "nope", true),
 	} {
-		if !errors.Is(err, ErrDefaultGroup) {
-			t.Errorf("%s default: %v", name, err)
+		if !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s a missing group: %v", name, err)
 		}
 	}
 
@@ -364,8 +363,8 @@ func TestMoveAndDeleteGroupKeepsSessions(t *testing.T) {
 	}
 	for _, id := range []string{a.ID, b.ID} {
 		got, err := s.Session(ctx, id)
-		if err != nil || got.GroupID != DefaultGroupID {
-			t.Errorf("session %s after group delete: %+v %v", id, got, err)
+		if err != nil || got.GroupID != "" {
+			t.Errorf("session %s after group delete is in no group: %+v %v", id, got, err)
 		}
 	}
 	if _, err := s.Group(ctx, g.ID); !errors.Is(err, ErrNotFound) {
@@ -634,7 +633,7 @@ func TestRemoteMigration(t *testing.T) {
 	if _, err := old.db.ExecContext(ctx, `INSERT INTO sessions (id, name, description, group_id, name_source, cwd,
 		claude_session_id, claude_history, transcript_path, status, status_detail, unseen, kind, bg_id, pid, external,
 		created_at, last_event_at, archived_at, harness) VALUES ('old', 'old', '', ?, 'auto', '/w', '', '[]', '',
-		'running', '', 0, 'hosted', '', 0, '', 1, 0, 0, 'terminal')`, DefaultGroupID); err != nil {
+		'running', '', 0, 'hosted', '', 0, '', 1, 0, 0, 'terminal')`, "default"); err != nil {
 		t.Fatal(err)
 	}
 	old.Close()
@@ -681,7 +680,7 @@ func TestSessionJobMigration(t *testing.T) {
 		if _, err := old.db.ExecContext(ctx, `INSERT INTO sessions (id, name, description, group_id, name_source, cwd,
 			claude_session_id, claude_history, transcript_path, status, status_detail, unseen, kind, bg_id, pid, external,
 			created_at, last_event_at, archived_at, harness) VALUES (?, ?, '', ?, 'auto', '/w', '', '[]', '',
-			'done', '', 0, 'hosted', '', 0, '', 1, 0, 0, 'claude')`, id, id, DefaultGroupID); err != nil {
+			'done', '', 0, 'hosted', '', 0, '', 1, 0, 0, 'claude')`, id, id, "default"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -727,5 +726,68 @@ func TestViewStateFromBeforeFocusModeWent(t *testing.T) {
 	}
 	if vs, err := s.ViewState(ctx); err != nil || vs.Mode != "groups" || vs.Sort != "name" {
 		t.Errorf("view state: %+v %v", vs, err)
+	}
+}
+
+// A store from before there was no Default group: its sessions in Default
+// move to no group, the Default row goes, and rebuilding the sessions table
+// loses nothing that refers to them (PAN-187).
+func TestNoDefaultGroupMigration(t *testing.T) {
+	orig := migrations
+	t.Cleanup(func() { migrations = orig })
+	migrations = func() ([]migration, error) {
+		ms, err := orig()
+		var before []migration
+		for _, m := range ms {
+			if m.name < "0022" {
+				before = append(before, m)
+			}
+		}
+		return before, err
+	}
+	p := filepath.Join(t.TempDir(), "state.db")
+	old, err := Open(ctx, p)
+	must(t, err)
+	g, err := old.CreateGroup(ctx, "work", "")
+	must(t, err)
+	for _, q := range []string{
+		`INSERT INTO sessions (id, name, group_id, created_at, kind, set_id, set_order) VALUES ('a', 'a', 'default', 1, 'hosted', 'S', 1)`,
+		`INSERT INTO sessions (id, name, group_id, created_at, kind, set_id, set_order) VALUES ('b', 'b', 'default', 2, 'hosted', 'S', 2)`,
+		`INSERT INTO sessions (id, name, group_id, created_at, kind) VALUES ('w', 'w', '` + g.ID + `', 3, 'hosted')`,
+		`INSERT INTO sets (id, created_at) VALUES ('S', 1)`,
+		`INSERT INTO claude_ids (claude_session_id, session_id) VALUES ('c-a', 'a')`,
+	} {
+		if _, err := old.db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	must(t, old.AddInboxItem(ctx, core.InboxItem{SessionID: "a", Kind: core.InboxDone, Text: "done", At: time.Now()}))
+	old.Close()
+
+	migrations = orig
+	s, err := Open(ctx, p)
+	must(t, err)
+	defer s.Close()
+	for id, want := range map[string]string{"a": "", "b": "", "w": g.ID} {
+		if got, err := s.Session(ctx, id); err != nil || got.GroupID != want {
+			t.Errorf("%s: group %q, want %q (%v)", id, got.GroupID, want, err)
+		}
+	}
+	if gs, _ := s.Groups(ctx, true); len(gs) != 1 || gs[0].ID != g.ID {
+		t.Errorf("groups after: %+v", gs)
+	}
+	if set, err := s.Set(ctx, "S"); err != nil || set.GroupID != "" {
+		t.Errorf("the set: %+v %v", set, err)
+	}
+	if got, err := s.SessionByClaudeID(ctx, "c-a"); err != nil || got.ID != "a" {
+		t.Errorf("claude id lost: %v %v", got, err)
+	}
+	if items, err := s.InboxQueue(ctx); err != nil || len(items) != 1 {
+		t.Errorf("Inbox lost: %d %v", len(items), err)
+	}
+	var fk int
+	must(t, s.db.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk))
+	if fk != 1 {
+		t.Error("foreign keys are off after the migration")
 	}
 }

@@ -39,8 +39,8 @@ nonisolated struct Snapshot: Decodable {
     /// The sessions, each with its group: a session that names none (in a
     /// container of a type the app doesn't know) goes in its nearest
     /// ancestor that's a group, following parents through sets and unknown
-    /// entities on its own host (design 7.2). One with no such ancestor has
-    /// none, and shows in its host's Default.
+    /// entities on its own host (design 7.2). One with no such ancestor is
+    /// in no group.
     func sessionsInGroups() -> [Session] {
         let groups = Set((self.groups ?? []).map { SessionGroup.key($0.host, $0.id) })
         var parents: [String: String] = [:]
@@ -141,26 +141,25 @@ nonisolated struct WakeState: Decodable, Equatable {
 
 /// A group of sessions (internal/ipc.Group): a named, coloured container you arrange.
 nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
-    /// Its id on its host: every host's Default is "default", so a group is
-    /// told apart by key.
+    /// Its id on its host: ids are unique only within their host, so a group
+    /// is told apart by key.
     let id: String
     let name: String
-    let isDefault: Bool
     let archivedAt: String
     /// One of the daemon's colour names (blue, magenta, cyan, yellow, green, red).
     var color = ""
-    /// Its place among the groups you arranged; Default has none and comes last.
+    /// Its place among the groups you arranged.
     var order = 0
     /// The Remote host it's on, for a host's tree; "" for this Mac's.
     var host = ""
 
     enum CodingKeys: String, CodingKey {
         case id, name, color, order, host
-        case isDefault = "is_default", archivedAt = "archived_at"
+        case archivedAt = "archived_at"
     }
 
-    init(id: String, name: String, isDefault: Bool = false, archivedAt: String = "", color: String = "", order: Int = 0, host: String = "") {
-        (self.id, self.name, self.isDefault, self.archivedAt) = (id, name, isDefault, archivedAt)
+    init(id: String, name: String, archivedAt: String = "", color: String = "", order: Int = 0, host: String = "") {
+        (self.id, self.name, self.archivedAt) = (id, name, archivedAt)
         (self.color, self.order, self.host) = (color, order, host)
     }
 
@@ -170,18 +169,16 @@ nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
     /// The key of group id on host.
     static func key(_ host: String, _ id: String) -> String { host.isEmpty ? id : host + "\u{1F}" + id }
 
-    /// Its name in the sidebar: a host's groups say their host, and a host's
-    /// Default is the host's name.
-    var title: String {
-        guard !host.isEmpty else { return name }
-        return isDefault ? host : "\(name) · \(host)"
-    }
+    /// Its name in the sidebar: a host's groups say their host.
+    var title: String { host.isEmpty ? name : "\(name) · \(host)" }
+
+    /// What the line over a host's sessions in no group says: it isn't a group.
+    static func noGroupTitle(host: String) -> String { host.isEmpty ? "No group" : "No group · \(host)" }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
-        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         archivedAt = try c.decodeIfPresent(String.self, forKey: .archivedAt) ?? ""
         color = try c.decodeIfPresent(String.self, forKey: .color) ?? ""
         order = try c.decodeIfPresent(Int.self, forKey: .order) ?? 0
@@ -448,8 +445,9 @@ nonisolated struct Session: Decodable, Identifiable, Equatable {
     var isRemote: Bool { remote == true }
     /// Its Remote host's name, or "" for this Mac.
     var hostName: String { host ?? "" }
-    /// Its group's key (SessionGroup.key): the group on its own host.
-    var groupKey: String? { groupID.map { SessionGroup.key(hostName, $0) } }
+    /// Its group's key (SessionGroup.key): the group on its own host. nil
+    /// when it's in no group.
+    var groupKey: String? { groupID.flatMap { $0.isEmpty ? nil : SessionGroup.key(hostName, $0) } }
     /// It as an op names it: on its host.
     var target: Target { Target(host: hostName, id: id) }
     /// It runs on a Remote host, added here from it.

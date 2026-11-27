@@ -77,7 +77,7 @@ func TestTheStreamSendsEntities(t *testing.T) {
 	c := dial(t, p)
 	s := subscribeTo(t, p, ipc.SubscribeRequest{})
 	first := s.next()
-	if first.Type != ipc.EventSnapshot || first.Snapshot == nil || len(first.Snapshot.Groups) == 0 {
+	if first.Type != ipc.EventSnapshot || first.Snapshot == nil {
 		t.Fatalf("first = %+v", first)
 	}
 	g := groupNamed(t, c, "Backend")
