@@ -118,7 +118,7 @@ func TestWireFixtures(t *testing.T) {
 var snake = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // checkNames: every name is snake_case, no time is Go's zero, and nothing is
-// null. Settings and pre_focus are keyed by setting and group, not names.
+// null. Settings are keyed by setting, not names.
 func checkNames(t *testing.T, file string, b []byte) {
 	t.Helper()
 	var v any
@@ -133,7 +133,7 @@ func checkNames(t *testing.T, file string, b []byte) {
 				if !snake.MatchString(k) {
 					t.Errorf("%s: %s.%s isn't snake_case", file, path, k)
 				}
-				if k == "settings" || k == "pre_focus" {
+				if k == "settings" {
 					continue
 				}
 				walk(path+"."+k, e)

@@ -307,7 +307,6 @@ const (
 	MutGroupMove      = "group.move"        // GroupID, After or Before: the group it goes next to
 	MutViewMode       = "view.mode"         // Text: groups|list
 	MutViewSort       = "view.sort"         // Text: key, Flag = descending
-	MutViewFocus      = "view.focus"        // GroupID ("" = leave focus mode)
 	MutViewFilter     = "view.filter"       // Text
 	MutViewArchived   = "view.archived"     // Flag = show archived
 	MutInboxRead      = "inbox.read"        // ItemIDs, Flag = read (else unread)

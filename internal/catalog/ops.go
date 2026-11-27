@@ -148,7 +148,6 @@ func localOps() []Op {
 		// The CLI's view.
 		mut(act(ipc.MutViewMode, "Shows sessions in groups or as one list.", host, nil, nil)),
 		mut(act(ipc.MutViewSort, "Sets the sort key and direction.", host, nil, nil)),
-		mut(act(ipc.MutViewFocus, "Shows only one group, or every group again.", host, nil, nil)),
 		mut(act(ipc.MutViewFilter, "Sets the text filter.", host, nil, nil)),
 		mut(act(ipc.MutViewArchived, "Shows or hides archived sessions.", host, nil, nil)),
 
