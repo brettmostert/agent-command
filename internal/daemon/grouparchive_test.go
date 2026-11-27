@@ -1,0 +1,111 @@
+package daemon
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"testing"
+
+	"github.com/brettmostert/agent-command/internal/core"
+	"github.com/brettmostert/agent-command/internal/ipc"
+	"github.com/brettmostert/agent-command/internal/store"
+)
+
+// archivedCount is how many of the sessions with these Claude ids are archived.
+func archivedCount(t *testing.T, c *ipc.Conn, cids ...string) int {
+	t.Helper()
+	snap, n := snapshot(t, c), 0
+	for _, cid := range cids {
+		if s := byClaude(snap, cid); s == nil {
+			t.Fatalf("no session %s", cid)
+		} else if s.Status == core.StatusArchived {
+			n++
+		}
+	}
+	return n
+}
+
+func groupArchived(t *testing.T, c *ipc.Conn, id string) bool {
+	t.Helper()
+	for _, g := range snapshot(t, c).Groups {
+		if g.ID == id {
+			return !g.ArchivedAt.IsZero()
+		}
+	}
+	t.Fatalf("no group %s", id)
+	return false
+}
+
+func TestArchivingDefaultChangesNothing(t *testing.T) {
+	p := testPaths(t)
+	start(t, p)
+	c := dial(t, p)
+	seedHosted(t, p, "a", "b")
+
+	err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: store.DefaultGroupID}, nil)
+	if !hasCode(err, ipc.CodeInvalid) {
+		t.Fatalf("archiving Default: want %s, got %v", ipc.CodeInvalid, err)
+	}
+	if n := archivedCount(t, c, "a", "b"); n != 0 {
+		t.Errorf("archiving Default archived %d of its sessions", n)
+	}
+	if groupArchived(t, c, store.DefaultGroupID) {
+		t.Error("Default is archived")
+	}
+}
+
+func TestArchivingAMissingGroupIsNotFound(t *testing.T) {
+	p := testPaths(t)
+	start(t, p)
+	c := dial(t, p)
+
+	err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: "nope"}, nil)
+	if !hasCode(err, ipc.CodeNotFound) {
+		t.Fatalf("want %s, got %v", ipc.CodeNotFound, err)
+	}
+}
+
+func TestArchivingAGroupIsAllOrNothing(t *testing.T) {
+	p := testPaths(t)
+	start(t, p)
+	c := dial(t, p)
+	ids := seedHosted(t, p, "a", "b", "c")
+	var g ipc.Group
+	must(t, c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "G"}, &g))
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(ids...), GroupID: g.ID})
+
+	// The group's own write fails, after every session's.
+	db, err := sql.Open("sqlite", "file:"+p.DB()+"?_pragma=busy_timeout(5000)")
+	must(t, err)
+	defer db.Close()
+	_, err = db.ExecContext(context.Background(), `CREATE TRIGGER fail_group_archive BEFORE UPDATE OF archived_at ON groups
+		WHEN NEW.id = '`+g.ID+`' AND NEW.archived_at != 0 BEGIN SELECT RAISE(ABORT, 'disk full'); END`)
+	must(t, err)
+
+	if err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: g.ID}, nil); err == nil {
+		t.Fatal("the archive should fail")
+	}
+	if n := archivedCount(t, c, "a", "b", "c"); n != 0 {
+		t.Errorf("a failed archive left %d sessions archived", n)
+	}
+	if groupArchived(t, c, g.ID) {
+		t.Error("a failed archive left the group archived")
+	}
+
+	// Once the failure is gone, the same archive works, and repeats safely.
+	_, err = db.ExecContext(context.Background(), `DROP TRIGGER fail_group_archive`)
+	must(t, err)
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: g.ID})
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: g.ID})
+	if n := archivedCount(t, c, "a", "b", "c"); n != 3 {
+		t.Errorf("archived %d of 3 sessions", n)
+	}
+	if !groupArchived(t, c, g.ID) {
+		t.Error("the group isn't archived")
+	}
+}
+
+func hasCode(err error, code string) bool {
+	var re *ipc.RemoteError
+	return errors.As(err, &re) && re.Code == code
+}

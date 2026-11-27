@@ -135,18 +135,7 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutGroupDelete:
 		return nil, st.DeleteGroup(ctx, m.GroupID)
 	case ipc.MutGroupArchive:
-		sessions, err := st.Sessions(ctx, false)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range sessions {
-			if s.GroupID == m.GroupID {
-				if err := d.archive(ctx, s.ID); err != nil {
-					return nil, err
-				}
-			}
-		}
-		return nil, st.SetGroupArchived(ctx, m.GroupID, true)
+		return nil, d.archiveGroup(ctx, m.GroupID)
 	case ipc.MutGroupUnarchive:
 		if err := st.SetGroupArchived(ctx, m.GroupID, false); err != nil {
 			return nil, err
@@ -275,15 +264,58 @@ func (d *Daemon) archive(ctx context.Context, id string) error {
 		return nil
 	}
 	d.stopHost(s)
+	return d.recordArchived(ctx, d.store, s)
+}
+
+// recordArchived archives s in st: its status, its Inbox items and its
+// event. Stopping its process is the caller's job.
+func (d *Daemon) recordArchived(ctx context.Context, st *store.Store, s *core.Session) error {
 	core.Apply(s, core.Event{Kind: core.EventArchived, Time: d.eventTime(s)})
-	if err := d.store.CloseInboxItems(ctx, s.ID); err != nil {
+	if err := st.CloseInboxItems(ctx, s.ID); err != nil {
 		return err
 	}
-	if err := d.store.UpdateSession(ctx, s); err != nil {
+	if err := st.UpdateSession(ctx, s); err != nil {
 		return err
 	}
-	return d.store.AppendEvent(ctx, store.LoggedEvent{SessionID: s.ID, ClaudeSessionID: s.ClaudeSessionID,
+	return st.AppendEvent(ctx, store.LoggedEvent{SessionID: s.ID, ClaudeSessionID: s.ClaudeSessionID,
 		Kind: string(core.EventArchived), Detail: string(s.Status)})
+}
+
+// archiveGroup archives a group and its sessions, all or nothing. It checks
+// the group before it changes anything, and stops the sessions' processes
+// only once the archive is saved.
+func (d *Daemon) archiveGroup(ctx context.Context, id string) error {
+	g, err := d.store.Group(ctx, id)
+	if err != nil {
+		return err
+	}
+	if g.IsDefault {
+		return invalid("the Default group can't be archived")
+	}
+	var archived []*core.Session
+	err = d.store.WithTx(ctx, func(st *store.Store) error {
+		sessions, err := st.Sessions(ctx, false)
+		if err != nil {
+			return err
+		}
+		for _, s := range sessions {
+			if s.GroupID != id || s.Status == core.StatusArchived {
+				continue
+			}
+			if err := d.recordArchived(ctx, st, s); err != nil {
+				return err
+			}
+			archived = append(archived, s)
+		}
+		return st.SetGroupArchived(ctx, id, true)
+	})
+	if err != nil {
+		return err
+	}
+	for _, s := range archived {
+		d.stopHost(s)
+	}
+	return nil
 }
 
 // focus enters (groupID != "") or leaves focus mode, persisting the
