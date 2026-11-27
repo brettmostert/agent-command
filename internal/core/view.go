@@ -20,7 +20,8 @@ type Row struct {
 	Number  int
 
 	// Header rows only.
-	Count     int    // sessions in the group (after filtering)
+	Depth     int    // 0 for a top-level group, 1 for one inside another
+	Count     int    // sessions in the group and the groups inside it (after filtering)
 	Urgent    Status // most urgent status in the group, for collapsed headers
 	Collapsed bool
 }
@@ -93,23 +94,48 @@ func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 		}
 	}
 
+	// Groups inside others come after their parent's own sessions. One
+	// whose parent isn't shown is at the top.
+	ordered := orderGroups(groups, vs.ShowArchived)
+	shown := map[string]bool{}
+	for _, g := range ordered {
+		shown[g.ID] = true
+	}
+	children := map[string][]*Group{}
+	var top []*Group
+	for _, g := range ordered {
+		if g.ParentID != "" && shown[g.ParentID] {
+			children[g.ParentID] = append(children[g.ParentID], g)
+		} else {
+			top = append(top, g)
+		}
+	}
 	var rows []Row
 	n := 0
-	for _, g := range orderGroups(groups, vs.ShowArchived) {
-		ms := members[g.ID]
-		if f.active() && len(ms) == 0 {
-			continue // filtering hides groups without matches
+	var add func(g *Group, depth int)
+	add = func(g *Group, depth int) {
+		all := append([]*Session{}, members[g.ID]...)
+		for _, c := range children[g.ID] {
+			all = append(all, members[c.ID]...)
+		}
+		if f.active() && len(all) == 0 {
+			return // filtering hides groups without matches
 		}
 		collapsed := (g.Collapsed || vs.IsCollapsed(g.ID)) && !f.active() // matches expand while filtering
-		h := Row{Group: g, Count: len(ms), Urgent: mostUrgent(ms), Collapsed: collapsed}
-		rows = append(rows, h)
+		rows = append(rows, Row{Group: g, Depth: depth, Count: len(all), Urgent: mostUrgent(all), Collapsed: collapsed})
 		if collapsed {
-			continue
+			return // a collapsed parent hides its children too
 		}
-		for _, s := range ms {
+		for _, s := range members[g.ID] {
 			n++
 			rows = append(rows, Row{Group: g, Session: s, Number: n})
 		}
+		for _, c := range children[g.ID] {
+			add(c, depth+1)
+		}
+	}
+	for _, g := range top {
+		add(g, 0)
 	}
 	// Sessions in no group come last, under a header that isn't a group: it
 	// never collapses.

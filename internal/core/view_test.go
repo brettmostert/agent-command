@@ -243,3 +243,37 @@ func TestViewCollapsesGroupsByID(t *testing.T) {
 		t.Errorf("collapsed by the view: %+v", rows)
 	}
 }
+
+// A group inside another comes after its parent's own sessions, a level in;
+// a collapsed parent hides it, and counts everything under it (PAN-189).
+func TestLayoutNestsGroups(t *testing.T) {
+	parent := &Group{ID: "p", Name: "Backend", SortKey: 10}
+	child := &Group{ID: "c", Name: "Workers", ParentID: "p", SortKey: 20}
+	other := &Group{ID: "o", Name: "Docs", SortKey: 30}
+	lost := &Group{ID: "l", Name: "Lost", ParentID: "gone", SortKey: 40}
+	ss := []*Session{
+		{ID: "a", GroupID: "p", CreatedAt: at(1)},
+		{ID: "b", GroupID: "c", Status: StatusWaiting, CreatedAt: at(2)},
+		{ID: "d", GroupID: "o", CreatedAt: at(3)},
+	}
+	gs := []*Group{child, other, parent, lost}
+	rows := Layout(ss, gs, ViewState{Mode: "groups"})
+	if got := render(rows); got != "[Backend] 1:a [Workers] 2:b [Docs] 3:d [Lost]" {
+		t.Errorf("nested: %s", got)
+	}
+	if rows[0].Depth != 0 || rows[2].Depth != 1 || rows[0].Count != 2 || rows[0].Urgent != StatusWaiting {
+		t.Errorf("parent and child headers: %+v %+v", rows[0], rows[2])
+	}
+	rows = Layout(ss, gs, ViewState{Mode: "groups", Collapsed: []string{"p"}})
+	if got := render(rows); got != "[Backend +] [Docs] 1:d [Lost]" {
+		t.Errorf("collapsed parent: %s", got)
+	}
+	if rows[0].Count != 2 || rows[0].Urgent != StatusWaiting {
+		t.Errorf("a collapsed parent counts what's under it: %+v", rows[0])
+	}
+	// Filtering keeps a parent whose child matches.
+	ss[1].Name = "flaky"
+	if got := render(Layout(ss, gs, ViewState{Mode: "groups", Filter: "flaky"})); got != "[Backend] [Workers] 1:b" {
+		t.Errorf("filtered: %s", got)
+	}
+}

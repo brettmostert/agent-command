@@ -15,7 +15,7 @@ import (
 
 func newGroupCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "group", Short: "Manage session groups"}
-	cmd.AddCommand(newGroupListCmd(), newGroupCreateCmd(), newGroupRenameCmd(), newGroupColorCmd(), newGroupPathCmd(),
+	cmd.AddCommand(newGroupListCmd(), newGroupCreateCmd(), newGroupRenameCmd(), newGroupColorCmd(), newGroupPathCmd(), newGroupNestCmd(),
 		newGroupDeleteCmd(), newGroupArchiveCmd(), newGroupUnarchiveCmd(),
 		newGroupCollapseCmd("collapse", true), newGroupCollapseCmd("expand", false))
 	return cmd
@@ -50,9 +50,13 @@ func newGroupListCmd() *cobra.Command {
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 				fmt.Fprintln(tw, "KIND\tGROUP\tCOLOR\tSESSIONS\tPATH\tSTATE")
-				for _, g := range snap.Groups {
+				for _, g := range nestedOrder(snap.Groups) {
 					if !g.ArchivedAt.IsZero() && !all {
 						continue
+					}
+					name := g.Name
+					if g.ParentID != "" {
+						name = "  └ " + name // inside the group above
 					}
 					state := ""
 					switch {
@@ -61,7 +65,7 @@ func newGroupListCmd() *cobra.Command {
 					case snap.ViewState.IsCollapsed(g.ID):
 						state = "collapsed"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", g.KindMark(), g.Name, g.Color, counts[g.ID], tildeHome(g.Path), state)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", g.KindMark(), name, g.Color, counts[g.ID], tildeHome(g.Path), state)
 				}
 				return tw.Flush()
 			})
@@ -71,8 +75,60 @@ func newGroupListCmd() *cobra.Command {
 	return cmd
 }
 
+// nestedOrder is groups with each one's children right after it.
+func nestedOrder(groups []*core.Group) []*core.Group {
+	known := map[string]bool{}
+	for _, g := range groups {
+		known[g.ID] = true
+	}
+	var out []*core.Group
+	for _, g := range groups {
+		if g.ParentID != "" && known[g.ParentID] {
+			continue
+		}
+		out = append(out, g)
+		for _, c := range groups {
+			if c.ParentID == g.ID {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+func newGroupNestCmd() *cobra.Command {
+	var top bool
+	cmd := &cobra.Command{
+		Use:   "nest <group> <parent>|--top",
+		Short: "Put a group inside another (two levels deep), or with --top back at the top",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if top == (len(args) == 2) {
+				return usageError{errors.New("give the group it goes inside, or --top")}
+			}
+			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
+				g, err := resolveGroup(snap, args[0])
+				if err != nil {
+					return err
+				}
+				parent := ""
+				if !top {
+					p, err := resolveGroup(snap, args[1])
+					if err != nil {
+						return err
+					}
+					parent = p.ID
+				}
+				return c.mutate(ipc.Mutation{Kind: ipc.MutGroupNest, GroupID: g.ID, ParentID: parent, Host: g.Host}, nil)
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&top, "top", false, "put it back at the top")
+	return cmd
+}
+
 func newGroupCreateCmd() *cobra.Command {
-	var color, folder string
+	var color, folder, parentName string
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a group, or with --folder a folder",
@@ -82,9 +138,17 @@ func newGroupCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withClient(cmd.Context(), func(c *client, _ snapshot) error {
+			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
+				parent := ""
+				if parentName != "" {
+					p, err := resolveGroup(snap, parentName)
+					if err != nil {
+						return err
+					}
+					parent = p.ID
+				}
 				var g ipc.Group
-				if err := c.mutate(ipc.Mutation{Kind: ipc.MutGroupCreate, Text: args[0], Color: color, Path: path}, &g); err != nil {
+				if err := c.mutate(ipc.Mutation{Kind: ipc.MutGroupCreate, Text: args[0], Color: color, Path: path, ParentID: parent}, &g); err != nil {
 					return err
 				}
 				if g.Path != "" {
@@ -98,6 +162,7 @@ func newGroupCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&color, "color", "", "blue, magenta, cyan, yellow, green or red (default: next in the palette)")
 	cmd.Flags().StringVar(&folder, "folder", "", "make it a folder at this path, made if it's missing: new sessions in it start there")
+	cmd.Flags().StringVar(&parentName, "parent", "", "make it inside this group (two levels deep); it starts in the parent's color")
 	return cmd
 }
 

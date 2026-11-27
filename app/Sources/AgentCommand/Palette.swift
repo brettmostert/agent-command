@@ -35,6 +35,8 @@ nonisolated enum PaletteAction: Equatable {
     case chooseGroupPath(String)
     /// Makes a folder a group again, by key.
     case clearGroupPath(String)
+    /// Puts a group inside another, by keys; nil is the top.
+    case nestGroup(String, into: String?)
     case closePane
     case focus(FocusDirection)
     case equalizePanes
@@ -278,6 +280,13 @@ enum Palette {
             list.append(PaletteEntry(section: "Groups", title: "Make \(group.title) a group", key: group.key, action: .clearGroupPath(group.key)))
         } else {
             list.append(PaletteEntry(section: "Groups", title: "Make \(group.title) a folder…", key: group.key, action: .chooseGroupPath(group.key)))
+        }
+        for parent in SidebarLayout.parents(for: group, in: state.groups) {
+            list.append(PaletteEntry(section: "Groups", title: "Move \(group.title) into \(parent.title)", key: group.key + "\u{1F}" + parent.key,
+                                     action: .nestGroup(group.key, into: parent.key)))
+        }
+        if !group.parent.isEmpty {
+            list.append(PaletteEntry(section: "Groups", title: "Move \(group.title) to the top level", key: group.key, action: .nestGroup(group.key, into: nil)))
         }
         list.append(PaletteEntry(section: "Groups", title: "Archive group \(group.title)…", key: group.key, action: .archiveGroup(group.key)))
         return list

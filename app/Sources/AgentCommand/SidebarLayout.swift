@@ -39,7 +39,9 @@ nonisolated struct SidebarOptions: Codable, Equatable {
         if focused == nil { beforeFocus = collapsed }
         focused = key
         mode = .groups
-        collapsed = Set(groups.map(\.key)).subtracting([key])
+        // Its parent and the groups inside it stay open, so it shows.
+        let open = Set([key] + groups.filter { $0.key == key }.compactMap(\.parentKey) + groups.filter { $0.parentKey == key }.map(\.key))
+        collapsed = Set(groups.map(\.key)).subtracting(open)
     }
 
     /// Leaves focus, bringing back what was collapsed before. Groups made while
@@ -73,11 +75,13 @@ nonisolated struct SidebarOptions: Codable, Equatable {
 /// A group's header in the sidebar.
 nonisolated struct GroupHeader: Equatable {
     let group: SessionGroup
-    /// The sessions listed in it.
+    /// The sessions listed in it and the groups inside it.
     let count: Int
     /// What in it needs you most, shown while it's collapsed.
     let urgent: SessionAttention?
     let collapsed: Bool
+    /// 0 at the top, 1 inside another group.
+    var depth = 0
 }
 
 /// The quiet line over a host's sessions in no group. It isn't a group: it has
@@ -148,13 +152,23 @@ enum SidebarLayout {
             byGroup[key, default: []].append(session)
         }
         var rows: [SidebarRow] = []
+        // A group inside another comes after its parent's own sessions, a
+        // level in. One whose parent isn't listed is at the top.
+        let listed = Set(ordered.map(\.key))
+        func children(_ group: SessionGroup) -> [SessionGroup] { ordered.filter { $0.parentKey == group.key } }
+        func add(_ group: SessionGroup, depth: Int) {
+            let inside = children(group)
+            let all = (byGroup[group.key] ?? []) + inside.flatMap { byGroup[$0.key] ?? [] }
+            if filtering && all.isEmpty { return }
+            let collapsed = options.collapsed.contains(group.key) && !filtering
+            rows.append(.header(GroupHeader(group: group, count: all.count, urgent: mostUrgent(all), collapsed: collapsed, depth: depth)))
+            if collapsed { return } // a collapsed parent hides its children too
+            rows += sessionRows(byGroup[group.key] ?? [], sets: sets)
+            for child in inside { add(child, depth: depth + 1) }
+        }
         for host in hosts {
-            for group in ordered where group.host == host {
-                let members = byGroup[group.key] ?? []
-                if filtering && members.isEmpty { continue }
-                let collapsed = options.collapsed.contains(group.key) && !filtering
-                rows.append(.header(GroupHeader(group: group, count: members.count, urgent: mostUrgent(members), collapsed: collapsed)))
-                if !collapsed { rows += sessionRows(members, sets: sets) }
+            for group in ordered where group.host == host && !(group.parentKey.map(listed.contains) ?? false) {
+                add(group, depth: 0)
             }
             if let loose = byGroup[noGroupKey(host)], !loose.isEmpty {
                 rows.append(.noGroup(NoGroupHeader(host: host, count: loose.count)))
@@ -241,6 +255,45 @@ enum SidebarLayout {
     /// host's, as the host arranges them.
     static func orderedGroups(_ groups: [SessionGroup]) -> [SessionGroup] {
         groups.filter { !$0.isArchived }.sorted(by: inOrder)
+    }
+
+    /// Live groups with each one's children right after it, and each one's
+    /// depth: for lists and pickers.
+    static func nestedGroups(_ groups: [SessionGroup]) -> [(group: SessionGroup, depth: Int)] {
+        let ordered = orderedGroups(groups)
+        let keys = Set(ordered.map(\.key))
+        var out: [(group: SessionGroup, depth: Int)] = []
+        for group in ordered where !(group.parentKey.map(keys.contains) ?? false) {
+            out.append((group, 0))
+            for child in ordered where child.parentKey == group.key { out.append((child, 1)) }
+        }
+        return out
+    }
+
+    /// The groups this one can go inside: its host's top-level groups but
+    /// itself. None when it has groups inside it (that'd be a third level).
+    static func parents(for group: SessionGroup, in groups: [SessionGroup]) -> [SessionGroup] {
+        let live = orderedGroups(groups)
+        guard !live.contains(where: { $0.parentKey == group.key }) else { return [] }
+        return live.filter { $0.host == group.host && $0.parent.isEmpty && $0.key != group.key && $0.key != group.parentKey }
+    }
+
+    /// Where a new session in group starts the folder chooser: a folder's
+    /// path; for a group, the folder of its most recent session, else its
+    /// parent folder's path. nil: where it starts today. An adjacent folder is
+    /// never used.
+    static func closestPath(_ group: SessionGroup, groups: [SessionGroup], sessions: [Session]) -> String? {
+        if group.isFolder { return group.path }
+        if let recent = sessions.filter({ $0.groupKey == group.key && !$0.cwd.isEmpty }).max(by: { $0.id < $1.id }) {
+            return recent.cwd
+        }
+        if let parent = group.parentKey.flatMap({ key in groups.first { $0.key == key } }), parent.isFolder { return parent.path }
+        return nil
+    }
+
+    /// The keys of a group and the groups inside it.
+    static func family(_ key: String, in groups: [SessionGroup]) -> Set<String> {
+        Set([key] + groups.filter { $0.parentKey == key }.map(\.key))
     }
 
     private static func inOrder(_ a: SessionGroup, _ b: SessionGroup) -> Bool {
@@ -330,11 +383,13 @@ enum SidebarDrop: Equatable {
         let key = String(item.dropFirst(6))
         let ordered = SidebarLayout.orderedGroups(groups)
         guard key != target, let dragged = ordered.first(where: { $0.key == key }) else { return nil }
+        // A group moves among its siblings: the same parent, or the top.
         if let host = SidebarLayout.noGroupHost(target) {
-            guard host == dragged.host, let last = ordered.last(where: { $0.host == host }), last.key != key else { return nil }
+            guard host == dragged.host, dragged.parent.isEmpty,
+                  let last = ordered.last(where: { $0.host == host && $0.parent.isEmpty }), last.key != key else { return nil }
             return .moveGroup(key, before: nil, after: last.key)
         }
-        guard let onto = ordered.first(where: { $0.key == target }), onto.host == dragged.host else { return nil }
+        guard let onto = ordered.first(where: { $0.key == target }), onto.host == dragged.host, onto.parent == dragged.parent else { return nil }
         return .moveGroup(key, before: target, after: nil)
     }
 }

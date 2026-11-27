@@ -71,3 +71,34 @@ func TestFoldersFromTheCLI(t *testing.T) {
 		t.Errorf("kind marks: %q", got)
 	}
 }
+
+// acmd makes a group inside another, nests one, and lists children under
+// their parent (PAN-189).
+func TestNestedGroupsFromTheCLI(t *testing.T) {
+	f := newFakeDaemon(t)
+	groups := []*core.Group{{ID: "p", Name: "Backend"}, {ID: "o", Name: "Docs", SortKey: 1}, {ID: "c", Name: "Workers", ParentID: "p", SortKey: 2}}
+	f.reply(ipc.OpSnapshot, ipc.Snapshot{Groups: ipc.GroupsOf(groups)})
+	var muts []ipc.Mutation
+	f.handle(ipc.OpMutate, func(raw json.RawMessage) (any, error) {
+		var m ipc.Mutation
+		must(t, json.Unmarshal(raw, &m))
+		muts = append(muts, m)
+		return ipc.GroupOf(&core.Group{ID: "n", Name: m.Text, ParentID: m.ParentID}), nil
+	})
+	out := mustRun(t, "group", "list")
+	if !strings.Contains(out, "└ Workers") || strings.Index(out, "Workers") > strings.Index(out, "Docs") {
+		t.Errorf("a child is listed under its parent:\n%s", out)
+	}
+	mustRun(t, "group", "create", "Queue", "--parent", "Backend")
+	mustRun(t, "group", "nest", "Docs", "Backend")
+	mustRun(t, "group", "nest", "Workers", "--top")
+	if len(muts) != 3 || muts[0].ParentID != "p" || muts[1].Kind != ipc.MutGroupNest || muts[1].GroupID != "o" || muts[1].ParentID != "p" ||
+		muts[2].GroupID != "c" || muts[2].ParentID != "" {
+		t.Errorf("mutations: %+v", muts)
+	}
+	for _, bad := range [][]string{{"group", "nest", "Docs"}, {"group", "nest", "Docs", "Backend", "--top"}, {"group", "nest", "Docs", "nope"}} {
+		if _, err := acmd(t, bad...); err == nil {
+			t.Errorf("%v should fail", bad)
+		}
+	}
+}

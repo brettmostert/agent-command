@@ -86,8 +86,8 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     /// What opens and closes the group list.
     static let groupKey = KeyCombo("cmd+g")
 
-    /// The chosen host's groups, in order.
-    var hostGroups: [SessionGroup] { SidebarLayout.orderedGroups(groups).filter { $0.host == (host ?? "") } }
+    /// The chosen host's groups, in order, each one's children after it.
+    var hostGroups: [SessionGroup] { SidebarLayout.nestedGroups(groups).map(\.group).filter { $0.host == (host ?? "") } }
 
     /// The group line's text.
     var groupTitle: String {

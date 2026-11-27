@@ -127,11 +127,20 @@ func TestWatch(t *testing.T) {
 	start(t, p)
 	c := dial(t, p)
 	var w ipc.WatchResponse
-	must(t, c.Call(ipc.OpWatch, ipc.WatchRequest{}, &w))
-	rev := w.Rev
-	must(t, c.Call(ipc.OpWatch, ipc.WatchRequest{Rev: rev, WaitMS: 10}, &w))
-	if w.Rev != rev {
-		t.Errorf("nothing changed: %d, %d", rev, w.Rev)
+	// The daemon's own start-up work can move the revision at first: wait
+	// for a quiet moment, when a short watch comes back with it unchanged.
+	var rev uint64
+	quiet := false
+	for range 50 {
+		must(t, c.Call(ipc.OpWatch, ipc.WatchRequest{}, &w))
+		rev = w.Rev
+		must(t, c.Call(ipc.OpWatch, ipc.WatchRequest{Rev: rev, WaitMS: 10}, &w))
+		if quiet = w.Rev == rev; quiet {
+			break
+		}
+	}
+	if !quiet {
+		t.Fatalf("the revision never stood still: it's at %d", w.Rev)
 	}
 	must(t, c.Call(ipc.OpEvent, hookEvent("SessionStart", `{"session_id":"w1","source":"startup"}`, time.Now(), ipc.HookContext{}), nil))
 	must(t, c.Call(ipc.OpWatch, ipc.WatchRequest{Rev: rev, WaitMS: 1000}, &w))

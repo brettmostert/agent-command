@@ -415,3 +415,62 @@ extension UsesSharedSpeech.GroupCallsTests {
     let group = SessionGroup(id: "g", name: "Backend")
     #expect(!group.isFolder && group.symbol == "circle.fill")
 }
+
+// MARK: Nested groups (PAN-189)
+
+private let family = [
+    SessionGroup(id: "p", name: "Backend", order: 10, path: "/w/api"),
+    SessionGroup(id: "c", name: "Workers", order: 20, parent: "p"),
+    SessionGroup(id: "o", name: "Docs", order: 30),
+    SessionGroup(id: "lost", name: "Lost", order: 40, parent: "gone"),
+]
+
+@Test func aGroupInsideAnotherComesAfterItsParentsSessions() throws {
+    let sessions = try [session("a", group: "p"), session("b", group: "c", status: "waiting"), session("d", group: "o")]
+    let rows = SidebarLayout.rows(sessions: sessions, groups: family, sets: [], options: SidebarOptions())
+    #expect(render(rows) == "[Backend] a [Workers] b [Docs] d [Lost]", "a group whose parent is gone is at the top")
+    guard case .header(let parent) = rows[0], case .header(let child) = rows[2] else { Issue.record("no headers"); return }
+    #expect(parent.depth == 0 && child.depth == 1 && parent.count == 2, "a parent counts what's under it")
+
+    var options = SidebarOptions()
+    options.collapsed = ["p"]
+    let collapsed = SidebarLayout.rows(sessions: sessions, groups: family, sets: [], options: options)
+    #expect(render(collapsed) == "[Backend+] [Docs] d [Lost]", "a collapsed parent hides its children")
+    if case .header(let h) = collapsed[0] { #expect(h.urgent?.reason == "waiting", "and shows what needs you under it") }
+
+    // Filtering keeps a parent whose child has a match.
+    let filtered = SidebarLayout.rows(sessions: [try session("b", group: "c")], groups: family, sets: [], options: options, filtering: true)
+    #expect(render(filtered) == "[Backend] [Workers] b")
+}
+
+@Test func groupsNestTwoLevelsAndMoveAmongTheirSiblings() {
+    #expect(SidebarLayout.nestedGroups(family).map { "\($0.group.id)\($0.depth)" } == ["p0", "c1", "o0", "lost0"])
+    #expect(SidebarLayout.parents(for: family[2], in: family).map(\.id) == ["p"], "Docs can go inside Backend, a top-level group")
+    #expect(SidebarLayout.parents(for: family[0], in: family).isEmpty, "Backend has a group inside it: no third level")
+    #expect(SidebarLayout.parents(for: family[1], in: family).map(\.id) == ["o"], "not its own parent, nor itself")
+    #expect(SidebarLayout.family("p", in: family) == ["p", "c"])
+
+    // Dragging reorders among siblings only.
+    #expect(SidebarDrop.action(items: [SidebarDrop.groupItem("o")], onto: "p", groups: family) == .moveGroup("o", before: "p", after: nil))
+    #expect(SidebarDrop.action(items: [SidebarDrop.groupItem("c")], onto: "o", groups: family) == nil, "a child among the top level")
+    #expect(SidebarDrop.action(items: [SidebarDrop.groupItem("c")], onto: SidebarLayout.noGroupKey(""), groups: family) == nil)
+}
+
+@Test func focusKeepsAChildsParentAndAParentsChildrenOpen() {
+    var options = SidebarOptions()
+    options.focus("c", groups: family)
+    #expect(options.collapsed == ["o", "lost"], "focusing Workers keeps Backend open, or it wouldn't show")
+    options.focus("p", groups: family)
+    #expect(options.collapsed == ["o", "lost"], "focusing Backend keeps Workers open")
+}
+
+@Test func aGroupsNewSessionsStartAtTheClosestPath() throws {
+    let recent = try session("zz", group: "c", cwd: "/w/api/auth")
+    let older = try session("a", group: "c", cwd: "/w/old")
+    #expect(SidebarLayout.closestPath(family[0], groups: family, sessions: []) == "/w/api", "a folder: its path")
+    #expect(SidebarLayout.closestPath(family[1], groups: family, sessions: [older, recent]) == "/w/api/auth", "its most recent session's folder")
+    #expect(SidebarLayout.closestPath(family[1], groups: family, sessions: []) == "/w/api", "else its parent folder's path")
+    #expect(SidebarLayout.closestPath(family[2], groups: family, sessions: []) == nil, "else where it starts today")
+    let g: SessionGroup = try JSONDecoder().decode(SessionGroup.self, from: Data(#"{"id":"c","name":"W","parent":"p","host":"studio"}"#.utf8))
+    #expect(g.parentKey == SessionGroup.key("studio", "p") && SessionGroup(id: "x", name: "x").parentKey == nil)
+}

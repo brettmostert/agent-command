@@ -653,14 +653,17 @@ final class SessionStore {
         var before: String?
         var flag: Bool?
         var path: String?
+        var parent_id: String?
 
         init(kind: String, on host: String = "", group_id: String? = nil, text: String? = nil, color: String? = nil,
-             targets: [Target]? = nil, after: String? = nil, before: String? = nil, flag: Bool? = nil, path: String? = nil) {
+             targets: [Target]? = nil, after: String? = nil, before: String? = nil, flag: Bool? = nil, path: String? = nil,
+             parent_id: String? = nil) {
             self.kind = kind
             self.host = host.isEmpty ? nil : host
             (self.group_id, self.text, self.color, self.targets, self.after, self.before) = (group_id, text, color, targets, after, before)
             self.flag = flag
             self.path = path
+            self.parent_id = parent_id
         }
     }
 
@@ -702,7 +705,43 @@ final class SessionStore {
     }
 
     /// The sessions a group's archive takes: those in it now.
-    func members(ofGroup key: String) -> [Session] { sessions.filter { $0.groupKey == key } }
+    /// The sessions a group's archive or delete takes: those in it and in the
+    /// groups inside it.
+    func members(ofGroup key: String) -> [Session] {
+        let family = SidebarLayout.family(key, in: groups)
+        return sessions.filter { $0.groupKey.map(family.contains) ?? false }
+    }
+
+    /// The groups marked in the sidebar, by key.
+    var markedGroupKeys: [String] {
+        markedIDs.compactMap(SidebarLayout.groupKey(cursor:)).sorted()
+    }
+
+    /// Puts a group inside parent (a group's key), or with nil at the top. With
+    /// marked groups and sessions, they all go: the groups inside it (those
+    /// that can), the sessions into it.
+    func nestGroup(_ key: String, into parent: String?) {
+        let target = parent.flatMap(group(key:))
+        var keys = [key]
+        if markedIDs.contains(SidebarLayout.headerID(key)) {
+            keys = markedGroupKeys
+            if let target {
+                let ids = Array(markedIDs.filter { SidebarLayout.groupKey(cursor: $0) == nil })
+                if !ids.isEmpty { moveSessions(ids, to: target.key) }
+            }
+        }
+        for key in keys {
+            guard let group = group(key: key) else { continue }
+            if let target {
+                guard SidebarLayout.parents(for: group, in: groups).contains(target) else { continue }
+            } else if group.parent.isEmpty {
+                continue
+            }
+            mutateGroup(GroupMutation(kind: "group.nest", on: group.host, group_id: group.id, parent_id: target?.id ?? ""),
+                        failure: "Couldn't move the group")
+        }
+        clearMarks()
+    }
 
     /// The groups below are named by key (SessionGroup.key): their id on their host.
     func renameGroup(_ key: String, to name: String) {
@@ -767,7 +806,7 @@ final class SessionStore {
     /// Moves a group one place up or down among the groups you arranged on its host.
     func moveGroup(_ key: String, by step: Int) {
         guard let group = group(key: key) else { return }
-        let ordered = SidebarLayout.orderedGroups(groups).filter { $0.host == group.host }
+        let ordered = SidebarLayout.orderedGroups(groups).filter { $0.host == group.host && $0.parent == group.parent }
         guard let at = ordered.firstIndex(where: { $0.key == key }) else { return }
         let to = at + step
         guard ordered.indices.contains(to) else { return }

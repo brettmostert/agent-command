@@ -192,8 +192,11 @@ type Group struct {
 	Color string
 	// Path makes it a folder: new sessions and schedules in it start there.
 	// "" is a group, which has no path.
-	Path    string
-	SortKey int
+	Path string
+	// ParentID is the group it's inside ("" at the top). Groups nest two
+	// levels: a group with children is never inside another.
+	ParentID string
+	SortKey  int
 	// Collapsed is the CLI's view of the group; clients get it in
 	// ViewState.Collapsed, not with the group.
 	Collapsed  bool `json:"-"`

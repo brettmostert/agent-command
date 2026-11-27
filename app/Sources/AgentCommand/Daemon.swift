@@ -155,16 +155,23 @@ nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
     /// A folder's path, on its host: new sessions and schedules in it start
     /// there. "" is a group, which has no path.
     var path = ""
+    /// The group it's inside, by id on its host; "" at the top. Groups nest
+    /// two levels.
+    var parent = ""
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color, order, host, path
+        case id, name, color, order, host, path, parent
         case archivedAt = "archived_at"
     }
 
-    init(id: String, name: String, archivedAt: String = "", color: String = "", order: Int = 0, host: String = "", path: String = "") {
+    init(id: String, name: String, archivedAt: String = "", color: String = "", order: Int = 0, host: String = "", path: String = "",
+         parent: String = "") {
         (self.id, self.name, self.archivedAt) = (id, name, archivedAt)
-        (self.color, self.order, self.host, self.path) = (color, order, host, path)
+        (self.color, self.order, self.host, self.path, self.parent) = (color, order, host, path, parent)
     }
+
+    /// Its parent's key, if it's inside a group.
+    var parentKey: String? { parent.isEmpty ? nil : Self.key(host, parent) }
 
     /// It's a folder: a group with a path.
     var isFolder: Bool { !path.isEmpty }
@@ -193,6 +200,7 @@ nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
         order = try c.decodeIfPresent(Int.self, forKey: .order) ?? 0
         host = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
         path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
+        parent = try c.decodeIfPresent(String.self, forKey: .parent) ?? ""
     }
 
     /// The colours a group can have, in the daemon's order.

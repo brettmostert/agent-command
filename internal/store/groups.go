@@ -19,7 +19,7 @@ var (
 // Palette is the round-robin color order for new groups.
 var Palette = []string{"blue", "magenta", "cyan", "yellow", "green", "red"}
 
-const groupCols = `id, name, color, sort_key, collapsed, created_at, archived_at, path`
+const groupCols = `id, name, color, sort_key, collapsed, created_at, archived_at, path, parent_id`
 
 // CreateGroup adds a group. An empty color is assigned from Palette; new
 // groups sort after existing ones.
@@ -38,8 +38,8 @@ func (s *Store) CreateGroup(ctx context.Context, name, color string) (*core.Grou
 			g.Color = Palette[count%len(Palette)]
 		}
 		g.SortKey = maxKey + 10
-		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?,?)`,
-			g.ID, g.Name, g.Color, g.SortKey, 0, ms(g.CreatedAt), 0, "")
+		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+			g.ID, g.Name, g.Color, g.SortKey, 0, ms(g.CreatedAt), 0, "", "")
 		return mapUnique(err)
 	})
 	if err != nil {
@@ -99,6 +99,12 @@ func (s *Store) SetGroupColor(ctx context.Context, id, color string) error {
 // Making sure the path exists is the caller's job: it's on the group's host.
 func (s *Store) SetGroupPath(ctx context.Context, id, path string) error {
 	return s.updateGroup(ctx, id, `UPDATE groups SET path = ? WHERE id = ?`, path, id)
+}
+
+// SetGroupParent puts a group inside parent ("" is the top), at sortKey
+// among its siblings. The rules (two levels, no cycles) are the caller's.
+func (s *Store) SetGroupParent(ctx context.Context, id, parent string, sortKey int) error {
+	return s.updateGroup(ctx, id, `UPDATE groups SET parent_id = ?, sort_key = ? WHERE id = ?`, parent, sortKey, id)
 }
 
 // SetGroupCollapsed records a group's collapsed state.
@@ -194,7 +200,7 @@ func scanGroup(row scanner) (*core.Group, error) {
 		collapsed           int
 		created, archivedAt int64
 	)
-	err := row.Scan(&g.ID, &g.Name, &g.Color, &g.SortKey, &collapsed, &created, &archivedAt, &g.Path)
+	err := row.Scan(&g.ID, &g.Name, &g.Color, &g.SortKey, &collapsed, &created, &archivedAt, &g.Path, &g.ParentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
