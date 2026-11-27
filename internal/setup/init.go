@@ -18,11 +18,15 @@ type Input struct {
 	// ClientOnly is a client-only daemon's machine (Windows): it runs no
 	// sessions, so init sets up acmd's settings and nothing for the agents.
 	ClientOnly bool
-	Home       string
-	ConfigFile string // acmd's config.toml
-	EnvFile    string // env.json
-	AcmdPath   string // stable path written into hooks
-	ClaudeDir  string // Claude's standard folder, holding its settings.json
+	// OtherFolders is an acmd pointed at other folders (paths.Overridden).
+	// The agents' hooks are in the home folder, which those don't move, and
+	// belong to the acmd on the default folders: nothing here writes them.
+	OtherFolders bool
+	Home         string
+	ConfigFile   string // acmd's config.toml
+	EnvFile      string // env.json
+	AcmdPath     string // stable path written into hooks
+	ClaudeDir    string // Claude's standard folder, holding its settings.json
 	// HarnessDirs are the Claude harnesses' own folders (CLAUDE_CONFIG_DIR):
 	// acmd's hooks go in each, as in ClaudeDir.
 	HarnessDirs []string
@@ -51,17 +55,26 @@ func (in Input) ClaudeDirs() []string {
 	return out
 }
 
+// OtherFoldersNote says why an acmd on other folders leaves the agents' hooks alone.
+const OtherFoldersNote = "the agents' hooks were left alone: they belong to the acmd on the default folders, " +
+	"and this acmd is on other folders (ACMD_STATE_DIR, ACMD_RUNTIME_DIR or ACMD_CONFIG_DIR). " +
+	"Its sessions don't show live status"
+
 // PlanInit plans `acmd init`.
 func PlanInit(in Input) (*Plan, error) {
 	p := &Plan{}
 	if in.ClientOnly {
 		return p, planConfig(p, in)
 	}
-	if err := planClaude(p, in, true); err != nil {
-		return nil, err
-	}
-	if err := planAntigravity(p, in, true); err != nil {
-		return nil, err
+	if in.OtherFolders {
+		p.Notes = append(p.Notes, OtherFoldersNote)
+	} else {
+		if err := planClaude(p, in, true); err != nil {
+			return nil, err
+		}
+		if err := planAntigravity(p, in, true); err != nil {
+			return nil, err
+		}
 	}
 	if err := planConfig(p, in); err != nil {
 		return nil, err
@@ -90,6 +103,10 @@ func PlanInit(in Input) (*Plan, error) {
 // else: for a Claude harness added after acmd init.
 func PlanHooks(in Input) (*Plan, error) {
 	p := &Plan{}
+	if in.OtherFolders {
+		p.Notes = append(p.Notes, OtherFoldersNote)
+		return p, nil
+	}
 	for _, dir := range in.HarnessDirs {
 		if err := planClaudeDir(p, in, filepath.Join(dir, "settings.json"), true); err != nil {
 			return nil, err
@@ -102,6 +119,10 @@ func PlanHooks(in Input) (*Plan, error) {
 // Antigravity's), and nothing else is touched.
 func PlanUninstall(in Input) (*Plan, error) {
 	p := &Plan{}
+	if in.OtherFolders {
+		p.Notes = append(p.Notes, OtherFoldersNote)
+		return p, nil
+	}
 	if err := planClaude(p, in, false); err != nil {
 		return nil, err
 	}

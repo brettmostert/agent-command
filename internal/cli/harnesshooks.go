@@ -78,7 +78,8 @@ func hooksForHarnesses(_ context.Context, hs []core.Harness) {
 		return
 	}
 	dirs := claudeFolders(hs, home)
-	plan, err := setup.PlanHooks(setup.Input{Home: home, AcmdPath: rec.AcmdPath, HarnessDirs: dirs, Read: os.ReadFile})
+	plan, err := setup.PlanHooks(setup.Input{OtherFolders: !onDefaultFolders(), Home: home, AcmdPath: rec.AcmdPath, HarnessDirs: dirs,
+		Read: os.ReadFile})
 	if err != nil || len(plan.Pending()) == 0 {
 		return
 	}

@@ -44,6 +44,11 @@ var endDaemon struct {
 // stands in for them.
 var onDefaultFolders = func() bool { return !paths.Overridden() }
 
+// otherFoldersService says why an acmd on other folders leaves the service
+// alone. It has no full stop, so it can end an error.
+const otherFoldersService = "there's one service for you, and it runs the acmd on the default folders. " +
+	"This acmd is on other folders (ACMD_STATE_DIR, ACMD_RUNTIME_DIR or ACMD_CONFIG_DIR), so it runs its own daemon"
+
 // installedService is the service when it's installed here and its daemon is
 // this acmd's. The service runs the default folders, so an acmd pointed at
 // others (paths.Overrides) has none: it starts, stops and restarts its own
@@ -85,6 +90,9 @@ type serviceOptions struct {
 // running outside it. It returns what to tell the user. Where there's no
 // service manager, it says why, and the daemon keeps starting on demand.
 func installService(ctx context.Context, p paths.Paths, binary string, o serviceOptions) ([]string, error) {
+	if !onDefaultFolders() {
+		return []string{"The service was left alone: " + otherFoldersService + "."}, nil
+	}
 	svc, err := localService()
 	if err != nil {
 		return nil, err
@@ -219,6 +227,9 @@ func newServiceInstallCmd() *cobra.Command {
 		Short: "Install and start the service (safe to rerun)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !onDefaultFolders() {
+				return &ExitError{Code: exitInvalid, Err: errors.New("acmd service install doesn't run here: " + otherFoldersService)}
+			}
 			p, err := paths.Default()
 			if err != nil {
 				return err
@@ -251,6 +262,9 @@ func newServiceUninstallCmd() *cobra.Command {
 		Short: "Stop and remove the service (the daemon then starts on demand)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !onDefaultFolders() {
+				return &ExitError{Code: exitInvalid, Err: errors.New("acmd service uninstall doesn't run here: " + otherFoldersService)}
+			}
 			svc, err := localService()
 			if err != nil {
 				return err

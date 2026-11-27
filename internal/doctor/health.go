@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/brettmostert/agent-command/internal/ipc"
@@ -15,6 +16,12 @@ import (
 // (hooks missing) or set up again by itself (the hooks run another acmd).
 // `acmd doctor --json` prints the daemon's list, so both say the same.
 func Health(ctx context.Context, e Env) []ipc.Health {
+	if e.OtherFolders {
+		// Setting up here would take the hooks from the default install.
+		return []ipc.Health{{ID: ipc.HealthSetupOtherFolders, Severity: ipc.HealthInfo, Title: "Sessions here show no live status",
+			Detail: "This acmd is on other folders (ACMD_STATE_DIR, ACMD_RUNTIME_DIR or ACMD_CONFIG_DIR). The agents' hooks " +
+				"belong to the acmd on the default folders, so this one leaves them alone."}}
+	}
 	var out []ipc.Health
 	initFix := func(title string) *ipc.HealthFix {
 		return &ipc.HealthFix{Op: ipc.OpInit, Title: title, Step: "Run acmd init."}
@@ -44,6 +51,12 @@ func Health(ctx context.Context, e Env) []ipc.Health {
 				"waiting or done. It backs the file up first, and keeps your other settings. It also saves your login shell's " +
 				"environment for the sessions it starts.",
 			Fix: initFix("Set Up")})
+	case len(need.others) > 0:
+		// Another acmd that's still there: switching is the user's choice.
+		out = append(out, ipc.Health{ID: ipc.HealthSetupOffer, Severity: ipc.HealthWarning, Title: "Use this acmd for the hooks?",
+			Detail: "The agents' hooks run " + strings.Join(need.others, " and ") + ", which is still installed. Setting up " +
+				"points them at this acmd (" + e.AcmdPath + "), so its sessions show when they're busy, waiting or done.",
+			Fix: initFix("Set Up")})
 	case need.stale:
 		out = append(out, ipc.Health{ID: ipc.HealthSetupRefresh, Severity: ipc.HealthInfo, Title: "Setting up again",
 			Detail: "The hooks run an acmd from before it moved.", Fix: initFix("Set Up Again")})
@@ -53,7 +66,34 @@ func Health(ctx context.Context, e Env) []ipc.Health {
 
 type need struct {
 	missing []string // where hooks are missing: "your Claude Code settings", "Antigravity's hooks.json"
-	stale   bool     // hooks are there, but run another acmd
+	stale   bool     // hooks are there, but run an acmd that's gone
+	others  []string // hooks are there, and run another acmd that's still installed
+}
+
+// note records hooks that run paths: nothing when they run this acmd; another
+// acmd that's still installed is one to ask about, and one that's gone moved.
+func (n *need) note(e Env, paths []string) {
+	if e.runsThis(paths) {
+		return
+	}
+	for _, p := range paths {
+		if e.runnable(p) {
+			if !slices.Contains(n.others, p) {
+				n.others = append(n.others, p)
+			}
+			return
+		}
+	}
+	n.stale = true
+}
+
+// runnable says whether path is a file that can run.
+func (e Env) runnable(path string) bool {
+	if e.Stat == nil {
+		return false
+	}
+	info, err := e.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 // setupNeed reads the agents' hook files: Claude Code's always (it's what
@@ -64,15 +104,15 @@ func setupNeed(e Env) need {
 	claude, _ := setup.HookPaths(settings)
 	if len(claude) == 0 {
 		n.missing = append(n.missing, "your Claude Code settings")
-	} else if !e.runsThis(claude) {
-		n.stale = true
+	} else {
+		n.note(e, claude)
 	}
 	for _, dir := range harnessDirs(e) {
 		b, _ := e.Read(filepath.Join(dir, "settings.json"))
 		if paths, _ := setup.HookPaths(b); len(paths) == 0 {
 			n.missing = append(n.missing, "the Claude settings in "+setup.Tilde(dir, e.Home))
-		} else if !e.runsThis(paths) {
-			n.stale = true
+		} else {
+			n.note(e, paths)
 		}
 	}
 	if _, err := e.LookPath("agy"); err == nil {
@@ -80,8 +120,8 @@ func setupNeed(e Env) need {
 		agy := setup.AntigravityHooks(file).Paths
 		if len(agy) == 0 {
 			n.missing = append(n.missing, "Antigravity's hooks.json")
-		} else if !e.runsThis(agy) {
-			n.stale = true
+		} else {
+			n.note(e, agy)
 		}
 	}
 	return n
