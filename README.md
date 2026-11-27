@@ -82,10 +82,10 @@ While attach and watch run, they count as this machine's terminal client, so `no
 
 ## Install
 
-There are two ways to install on a Mac or Linux machine. Both use Homebrew; on Linux and WSL2, install [Homebrew](https://brew.sh) first.
+There are two ways to install on a Mac or Linux machine:
 
 - **The app and acmd**, for a Mac you use: the app's cask installs acmd with it.
-- **acmd only**, for a headless machine, one with no screen, or one you reach only from another: Linux (amd64 and arm64, any distribution), WSL2, or a Mac.
+- **acmd only**, for a headless machine, one with no screen, or one you reach only from another: Linux (amd64 and arm64, any distribution), WSL2, or a Mac. Install it with Homebrew, or with the [install script](#acmd-only-with-the-install-script), which needs no Homebrew and no sudo.
 
 Either way, acmd runs the daemon, the sessions and the Claude Code hooks. The app is one client of it.
 
@@ -130,6 +130,26 @@ Within a minute, the service's daemon restarts on the new version by itself, and
 
 **Uninstall.** See [Uninstall acmd](#uninstall-acmd).
 
+### acmd only, with the install script
+
+Linux (amd64 and arm64), WSL2, or macOS 26 or later on Apple Silicon, with no Homebrew and no sudo:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/brettmostert/agent-command/main/scripts/install.sh | sh
+```
+
+It downloads the latest release, checks its SHA-256, and installs acmd in `~/.local/share/agent-command/<version>`, with `acmd` and `agent-command` linked in `~/.local/bin`. Then it runs `acmd init`. If [gh](https://cli.github.com) is installed and logged in, it also checks the build's attestation. If acmd from Homebrew is installed, it stops: two copies would mean two daemons, so use `brew upgrade acmd` for that one.
+
+**Upgrade:** run it again. Within a minute, the service's daemon restarts on the new version by itself, and sessions keep running.
+
+**Options**, as flags (`curl … | sh -s -- --no-init`) or environment variables:
+
+| Flag | Variable | What it does |
+| -- | -- | -- |
+| `--version 0.96.0` | `ACMD_VERSION=0.96.0` | Installs that version, not the latest. |
+| `--no-init` | `ACMD_NO_INIT=1` | Skips `acmd init`. |
+| `--uninstall` | `ACMD_UNINSTALL=1` | Runs `acmd uninstall --yes`, then removes acmd and its links. |
+
 ### The service
 
 `acmd init` installs the service, which runs acmd's daemon as you: a launchd agent on macOS (`~/Library/LaunchAgents/com.brettmostert.agent-command.daemon.plist`), which starts it at login, and a systemd user unit on Linux and WSL2 (`~/.config/systemd/user/agent-command.service`), which starts it at boot with lingering on. Sessions keep running when it restarts. `acmd service status` says whether it's installed and running, `acmd service install` puts it back, and `acmd service uninstall` removes it; without it, the daemon starts when something needs it. WSL2 needs systemd turned on (`[boot] systemd=true` in `/etc/wsl.conf`, then `wsl --shutdown`). `acmd daemon restart` and `acmd daemon stop` go through the service.
@@ -149,7 +169,15 @@ scoop bucket add brettmostert https://github.com/brettmostert/scoop-bucket
 scoop install acmd
 ```
 
-On Windows acmd only connects to hosts: it runs no sessions of its own, and can't host them. Pair it with a host as in [Windows](docs/remote-sessions.md#windows), then `acmd list` shows the host's sessions. The install runs `acmd init`, which adds a logon task in Task Scheduler (`Agent Command daemon`) that starts the daemon hidden at logon, as you, with no password stored. acmd keeps its files in `%LOCALAPPDATA%\agent-command`, which only you can open. `scoop update acmd` upgrades it and restarts the daemon, and `scoop uninstall acmd` removes the task. WSL2 is Linux: use brew there.
+Or, with no Scoop and no admin, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/brettmostert/agent-command/main/scripts/install.ps1 | iex
+```
+
+The install script does what Scoop does: it installs acmd in `%LOCALAPPDATA%\Programs\agent-command\<version>`, points the folder `current` there, puts `current` on your PATH and runs `acmd init`. Run it again to upgrade. If acmd from Scoop is installed, it stops: use `scoop update acmd` for that one. `irm … | iex` takes no arguments, so its options are the environment variables above: for example `$env:ACMD_UNINSTALL = 1` before it removes acmd.
+
+On Windows acmd only connects to hosts: it runs no sessions of its own, and can't host them. Pair it with a host as in [Windows](docs/remote-sessions.md#windows), then `acmd list` shows the host's sessions. The install runs `acmd init`, which adds a logon task in Task Scheduler (`Agent Command daemon`) that starts the daemon hidden at logon, as you, with no password stored. acmd keeps its files in `%LOCALAPPDATA%\agent-command`, which only you can open. `scoop update acmd` upgrades it and restarts the daemon, and `scoop uninstall acmd` removes the task. WSL2 is Linux: use brew or `install.sh` there.
 
 <details>
 <summary>Manual download</summary>

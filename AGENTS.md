@@ -36,7 +36,7 @@ When a ticket is done, comment on it: what was built, what differs from the plan
 
 ## Where things are
 
-- **Install targets:** brew on macOS, Linux and WSL2 (WSL2 counts as Linux), and Scoop on Windows. Windows runs a client-only daemon: it connects to hosts, but doesn't run sessions.
+- **Install targets:** brew on macOS, Linux and WSL2 (WSL2 counts as Linux), and Scoop on Windows. Or acmd only, with no brew or Scoop: `scripts/install.sh` (`curl … | sh`) and `scripts/install.ps1` (`irm … | iex`), served from `main`. They read the tap's latest release, so the release workflow knows nothing of them. Their tests are in `test/install`. Windows runs a client-only daemon: it connects to hosts, but doesn't run sessions.
 - **The Go code:**
   - `cmd/agent-command` and `internal/cli`: the `acmd` command;
   - `internal/daemon`: the daemon;

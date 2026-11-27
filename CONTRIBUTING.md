@@ -30,6 +30,8 @@ Workflows run on GitHub-hosted runners: `macos-26` for what needs a Mac (the app
 4. If a job fails, the release stays a draft, titled `[FAILED] vX.Y.Z`. A note at the top of it links the run and says whether the tap release and the cask were published. If the cause was outside the code (a runner, the network, a setting), use **Re-run failed jobs** on that run: each job is safe to run again, and the build it publishes is the one already attested. Don't use **Re-run all jobs** once the tap release is published: it builds a different zip, which the tap release can't take. If the code needs a fix, delete the draft and ship the fix as the next patch version. The tag stays. Never move or reuse tags.
 5. If a published release is bad and the fix will take a while, roll the cask back: in [brettmostert/homebrew-tap](https://github.com/brettmostert/homebrew-tap), revert the commit `agent-command X.Y.Z` on `main` and push it. The earlier zips stay on the tap, so the reverted cask installs the previous version again. This only helps people who haven't upgraded yet: Homebrew doesn't downgrade an installed cask when its version goes down. They get the fix with the next patch version, which is still the way out.
 
+The install scripts, `scripts/install.sh` and `scripts/install.ps1`, aren't part of a release. People run them from `main`, and they install the tap's latest release, from its `checksums.txt`. A change to them is live once it merges, so it must work with the release that's out. `test/install` runs them against a fake tap release.
+
 Versioning is SemVer. Before 1.0, `feat` bumps the minor version and `fix` the patch. Breaking changes bump the minor version too.
 
 ## One-time repository setup
