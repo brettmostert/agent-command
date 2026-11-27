@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.98.0](https://github.com/brettmostert/agent-command/compare/v0.97.0...v0.98.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* commands take ids only, acmd find, and each client keeps its own view ([#220](https://github.com/brettmostert/agent-command/issues/220))
+
+### Features
+
+* commands take ids only, acmd find, and each client keeps its own view ([#220](https://github.com/brettmostert/agent-command/issues/220)) ([e43a482](https://github.com/brettmostert/agent-command/commit/e43a482b9d2ad04d13ef3ada6c7a7c55f2f6e868))
+
 ## [0.97.0](https://github.com/brettmostert/agent-command/compare/v0.96.0...v0.97.0) (2026-11-27)
 
 
