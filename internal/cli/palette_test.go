@@ -10,7 +10,7 @@ import (
 	"github.com/brettmostert/agent-command/internal/ipc"
 )
 
-// PAN-190's CLI fixes: unarchive --as, collapse on the group's host, and an
+// PAN-190's CLI fixes: unarchive --as, and an
 // archived group refused before anything is sent.
 func TestTheCLIUnarchivesUnderANewNameAndRefusesArchivedGroups(t *testing.T) {
 	f := newFakeDaemon(t)
@@ -42,7 +42,7 @@ func TestTheCLIUnarchivesUnderANewNameAndRefusesArchivedGroups(t *testing.T) {
 	}
 
 	mustRun(t, "group", "collapse", "Backend")
-	if m := muts[len(muts)-1]; m.Kind != ipc.MutGroupCollapse || m.GroupID != "new" || !m.Flag {
+	if m := muts[len(muts)-1]; m.Kind != ipc.MutGroupCollapse || m.GroupID != "new" || !m.Flag || m.Host != "" {
 		t.Errorf("collapse: %+v", m)
 	}
 

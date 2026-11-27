@@ -351,7 +351,7 @@ func newGroupCollapseCmd(use string, collapsed bool) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					m.GroupID, m.Host = g.ID, g.Host // on the group's host, as the other group commands
+					m.GroupID = g.ID // collapse is the view's, not the host's: no host
 				}
 				return c.mutate(m, nil)
 			})
