@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.97.0](https://github.com/brettmostert/agent-command/compare/v0.96.0...v0.97.0) (2026-11-27)
+
+
+### Features
+
+* groups: a palette in three tiers, unarchiving under a new name, and CLI and cursor fixes ([#217](https://github.com/brettmostert/agent-command/issues/217)) ([5ed65c0](https://github.com/brettmostert/agent-command/commit/5ed65c0835ed21533b341505b2233c97ce64ff75))
+
 ## [0.96.0](https://github.com/brettmostert/agent-command/compare/v0.95.0...v0.96.0) (2026-11-27)
 
 
