@@ -149,8 +149,9 @@ func runTerminalUI(cmd *cobra.Command) error {
 		return err
 	}
 	o := tui.Options{
-		Daemon: c.conn,
-		Me:     c.terminal,
+		Daemon:   c.conn,
+		Me:       c.terminal,
+		ViewFile: p.TUIView(),
 		Subscribe: func() (tui.Stream, error) {
 			s, err := connectTerminal(ctx)
 			if err != nil {

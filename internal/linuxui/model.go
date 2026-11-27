@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -47,8 +48,10 @@ type SidebarModel struct {
 }
 
 // BuildSidebar computes the sidebar rows using core.Layout and indexes sessions by (host, id).
-func BuildSidebar(snap ipc.Snapshot, filter string) SidebarModel {
-	vs := snap.ViewState.Core()
+// The view is the Linux UI's own, kept only while it runs: grouped, by
+// creation, with the groups it has collapsed. The daemon keeps no view.
+func BuildSidebar(snap ipc.Snapshot, filter string, collapsed []string) SidebarModel {
+	vs := core.ViewState{Mode: "groups", Sort: "created", Collapsed: collapsed}
 	if strings.TrimSpace(filter) != "" {
 		vs.Filter = filter
 	}
@@ -246,4 +249,12 @@ func ParseGhosttyTheme(content string) Palette {
 		}
 	}
 	return p
+}
+
+// toggleCollapsed collapses group id, or expands it if it's collapsed.
+func toggleCollapsed(collapsed []string, id string) []string {
+	if i := slices.Index(collapsed, id); i >= 0 {
+		return slices.Delete(slices.Clone(collapsed), i, i+1)
+	}
+	return append(slices.Clone(collapsed), id)
 }

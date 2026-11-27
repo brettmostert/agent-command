@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -83,8 +84,8 @@ func TestLayoutGroupView(t *testing.T) {
 	}
 
 	// Collapsed group: header shows count + most urgent status, sessions get no number.
-	gs[1].Collapsed = true
-	rows = Layout(ss, gs, ViewState{Mode: "groups"})
+	shut := ViewState{Mode: "groups", Collapsed: []string{gs[1].ID}}
+	rows = Layout(ss, gs, shut)
 	if got := render(rows); got != "[PROJ-123 auth +] [billing] 1:d [No group] 2:c" {
 		t.Errorf("collapsed: %s", got)
 	}
@@ -93,10 +94,10 @@ func TestLayoutGroupView(t *testing.T) {
 	}
 
 	// Filtering expands matching groups and hides the rest.
-	if got := render(Layout(ss, gs, ViewState{Mode: "groups", Filter: "flaky"})); got != "[PROJ-123 auth] 1:b" {
+	shut.Filter = "flaky"
+	if got := render(Layout(ss, gs, shut)); got != "[PROJ-123 auth] 1:b" {
 		t.Errorf("filtered: %s", got)
 	}
-	gs[1].Collapsed = false
 
 	// Empty groups show without a filter; "No group" shows only with sessions in it.
 	empty := &Group{ID: "g3", Name: "empty", SortKey: 30}
@@ -154,25 +155,38 @@ func TestNaturalCompare(t *testing.T) {
 	}
 }
 
-func TestResolve(t *testing.T) {
-	ss, gs := fixtureView()
+func TestResolveTakesOnlyIDs(t *testing.T) {
+	ss, _ := fixtureView()
 	ss[0].ClaudeSessionID = "9df2c810-full"
-	rows := Layout(ss, gs, ViewState{Mode: "list"})
-	cases := map[string]string{"2": "b", "a": "a", "9df2c810-full": "a", "FIX": "b", "invoice": "d"}
-	for sel, want := range cases {
-		s, err := Resolve(rows, ss, sel)
-		if err != nil || s.ID != want {
+	for sel, want := range map[string]string{"a": "a", "b\n": "b", "9df2c810-full": "a"} {
+		if s, err := Resolve(ss, sel); err != nil || s.ID != want {
 			t.Errorf("Resolve(%q) = %v, %v; want %s", sel, s, err, want)
 		}
 	}
-	for sel, wantErr := range map[string]error{"": ErrNoMatch, "9": ErrNoMatch, "zzz": ErrNoMatch} {
-		if _, err := Resolve(rows, ss, sel); !errors.Is(err, wantErr) {
+	// A number, a name or a prefix of one never picks a session.
+	for _, sel := range []string{"", "1", "2", "FIX", "invoice", "9df2c810"} {
+		if _, err := Resolve(ss, sel); !errors.Is(err, ErrNoMatch) {
 			t.Errorf("Resolve(%q) err = %v", sel, err)
 		}
 	}
-	ss = append(ss, &Session{ID: "f", Name: "fix the docs", CreatedAt: time.Now()})
-	if _, err := Resolve(rows, ss, "fix"); !errors.Is(err, ErrAmbiguous) || !strings.Contains(err.Error(), "fix the docs") {
-		t.Errorf("ambiguous: %v", err)
+	if _, err := Resolve(ss, "zzz"); err == nil || !strings.Contains(err.Error(), "acmd find") {
+		t.Errorf("the error should say how to find an id: %v", err)
+	}
+}
+
+func TestFindMatchesAnyPartOfTheName(t *testing.T) {
+	ss := []*Session{{ID: "1", Name: "Fix auth"}, {ID: "2", Name: "docs"}, {ID: "3", Name: "prefix tests"}, {ID: "4"}}
+	ids := func(ss []*Session) (out []string) {
+		for _, s := range ss {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	if got := ids(Find(ss, "FIX")); !reflect.DeepEqual(got, []string{"1", "3"}) {
+		t.Errorf("Find(FIX) = %v", got)
+	}
+	if got := Find(ss, "  "); got != nil {
+		t.Errorf("an empty name matches nothing: %v", ids(got))
 	}
 }
 

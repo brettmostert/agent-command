@@ -32,23 +32,21 @@ func TestTheCLIUnarchivesUnderANewNameAndRefusesArchivedGroups(t *testing.T) {
 		return nil, nil
 	})
 
-	_, err := acmd(t, "group", "unarchive", "Backend")
+	if _, err := acmd(t, "group", "unarchive", "Backend"); err == nil || len(muts) != 0 {
+		t.Errorf("unarchived a group by its name: %v %+v", err, muts)
+	}
+	_, err := acmd(t, "group", "unarchive", "old")
 	if err == nil || !strings.Contains(err.Error(), "Backend (new) has that name") || !strings.Contains(err.Error(), "--as 'Backend 2'") {
 		t.Errorf("a taken name: %v", err)
 	}
-	mustRun(t, "group", "unarchive", "Backend", "--as", "Backend 2")
+	mustRun(t, "group", "unarchive", "old", "--as", "Backend 2")
 	if m := muts[len(muts)-1]; m.GroupID != "old" || m.Text != "Backend 2" {
 		t.Errorf("unarchive --as: %+v", m)
 	}
 
-	mustRun(t, "group", "collapse", "Backend")
-	if m := muts[len(muts)-1]; m.Kind != ipc.MutGroupCollapse || m.GroupID != "new" || !m.Flag || m.Host != "" {
-		t.Errorf("collapse: %+v", m)
-	}
-
 	n := len(muts)
 	_, err = acmd(t, "new", "--harness", "terminal", "--no-remote", "--group", "old")
-	if err == nil || !strings.Contains(err.Error(), "Backend is archived: unarchive it first (acmd group unarchive Backend)") {
+	if err == nil || !strings.Contains(err.Error(), "Backend is archived: unarchive it first (acmd group unarchive old)") {
 		t.Errorf("new --group <an archived group's id>: %v", err)
 	}
 	if len(muts) != n {

@@ -21,7 +21,7 @@ func TestScheduleCommands(t *testing.T) {
 	}
 	out := mustRun(t, "schedule", "add", "Morning triage", "--cron", " 0  9 * * 1-5", "--prompt", "Triage new issues",
 		"--set", "model=opus", "--set", "allowed-tools=Read", "--set", "allowed-tools=Bash(git log:*)", "--description", "issues")
-	if !strings.Contains(out, `Added "Morning triage": weekdays at 09:00 (0 9 * * 1-5). Next run `) {
+	if !strings.Contains(out, `Added "Morning triage" (`+jobID(t, "Morning triage")+`): weekdays at 09:00 (0 9 * * 1-5). Next run `) {
 		t.Errorf("add: %q", out)
 	}
 	out = mustRun(t, "schedule", "list")
@@ -29,7 +29,11 @@ func TestScheduleCommands(t *testing.T) {
 		t.Errorf("list: %q", out)
 	}
 
-	out = mustRun(t, "schedule", "show", "morning")
+	// A job is its id: never its name.
+	if _, err := acmd(t, "schedule", "show", "Morning triage"); err == nil || !strings.Contains(err.Error(), "give its id") {
+		t.Errorf("show by name: %v", err)
+	}
+	out = mustRun(t, "schedule", "show", jobID(t, "Morning triage"))
 	for _, want := range []string{"issues", "a new session in " + dir, "allowed-tools", "Read, Bash(git log:*)",
 		"opus", "Triage new issues"} {
 		if !strings.Contains(out, want) {
@@ -42,48 +46,48 @@ func TestScheduleCommands(t *testing.T) {
 	if err := os.WriteFile(notes, []byte("# Notes\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mustRun(t, "schedule", "edit", "Morning triage", "--cron", "*/7 * * * *", "--prompt-file", "notes.md",
+	mustRun(t, "schedule", "edit", jobID(t, "Morning triage"), "--cron", "*/7 * * * *", "--prompt-file", "notes.md",
 		"--unset", "model", "--set", "effort=high", "--name", "Triage", "--run-missed")
 	j := job(t, "Triage")
 	if j.Cron != "*/7 * * * *" || j.PromptFile != notes || j.Prompt != "" || j.Description != "issues" || !j.RunMissed ||
 		j.Settings["model"] != nil || j.Settings["effort"][0] != "high" || len(j.Settings["allowed-tools"]) != 2 {
 		t.Errorf("edit: %+v", j)
 	}
-	if out := mustRun(t, "schedule", "show", "Triage"); !strings.Contains(out, "read from "+notes) {
+	if out := mustRun(t, "schedule", "show", jobID(t, "Triage")); !strings.Contains(out, "read from "+notes) {
 		t.Errorf("show prompt file: %q", out)
 	}
 
 	// A worktree needs a repo; a one-off goes in as one.
-	if _, err := acmd(t, "schedule", "edit", "Triage", "--worktree", dir); err == nil {
+	if _, err := acmd(t, "schedule", "edit", jobID(t, "Triage"), "--worktree", dir); err == nil {
 		t.Error("a worktree outside a repo")
 	}
 	at := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
-	mustRun(t, "schedule", "edit", "Triage", "--once", at.Format("2006-01-02 15:04"))
+	mustRun(t, "schedule", "edit", jobID(t, "Triage"), "--once", at.Format("2006-01-02 15:04"))
 	if j := job(t, "Triage"); j.Cron != "" || !j.Once.Equal(at) {
 		t.Errorf("once: %+v", j)
 	}
-	mustRun(t, "schedule", "edit", "Triage", "--description", "still once")
+	mustRun(t, "schedule", "edit", jobID(t, "Triage"), "--description", "still once")
 	if j := job(t, "Triage"); !j.Once.Equal(at) {
 		t.Errorf("editing kept the one-off? %+v", j)
 	}
 
-	mustRun(t, "schedule", "pause", "Triage")
+	mustRun(t, "schedule", "pause", jobID(t, "Triage"))
 	if out := mustRun(t, "schedule", "list"); !strings.Contains(out, "paused") {
 		t.Errorf("paused: %q", out)
 	}
-	mustRun(t, "schedule", "resume", "Triage")
+	mustRun(t, "schedule", "resume", jobID(t, "Triage"))
 	if j := job(t, "Triage"); j.Paused {
 		t.Error("resumed")
 	}
 
 	// The test daemon has no hosts, so a run fails, and says why.
-	if _, err := acmd(t, "schedule", "run", "Triage"); err == nil || !strings.Contains(err.Error(), "Claude Code isn't available") {
+	if _, err := acmd(t, "schedule", "run", jobID(t, "Triage")); err == nil || !strings.Contains(err.Error(), "Claude Code isn't available") {
 		t.Errorf("run: %v", err)
 	}
-	if out := mustRun(t, "schedule", "runs", "Triage"); !strings.Contains(out, "failed") {
+	if out := mustRun(t, "schedule", "runs", jobID(t, "Triage")); !strings.Contains(out, "failed") {
 		t.Errorf("runs: %q", out)
 	}
-	if out := mustRun(t, "schedule", "show", "Triage"); !strings.Contains(out, "DUE") {
+	if out := mustRun(t, "schedule", "show", jobID(t, "Triage")); !strings.Contains(out, "DUE") {
 		t.Errorf("show runs: %q", out)
 	}
 
@@ -96,15 +100,15 @@ func TestScheduleCommands(t *testing.T) {
 	if j := job(t, "Agy"); j.HarnessID == "" || j.Settings["mode"][0] != "plan" {
 		t.Errorf("agy job: %+v", j)
 	}
-	if out := mustRun(t, "schedule", "show", "Agy"); !strings.Contains(out, "Harness   Antigravity (Antigravity)") {
+	if out := mustRun(t, "schedule", "show", jobID(t, "Agy")); !strings.Contains(out, "Harness   Antigravity (Antigravity)") {
 		t.Errorf("show agy: %q", out)
 	}
-	mustRun(t, "schedule", "delete", "Agy", "--yes")
+	mustRun(t, "schedule", "delete", jobID(t, "Agy"), "--yes")
 
-	if _, err := acmd(t, "schedule", "delete", "Triage"); err == nil {
+	if _, err := acmd(t, "schedule", "delete", jobID(t, "Triage")); err == nil {
 		t.Error("deleted without --yes")
 	}
-	if out := mustRun(t, "schedule", "delete", "Triage", "--yes"); !strings.Contains(out, `Deleted "Triage"`) {
+	if out := mustRun(t, "schedule", "delete", jobID(t, "Triage"), "--yes"); !strings.Contains(out, `Deleted "Triage"`) {
 		t.Errorf("delete: %q", out)
 	}
 	if out := mustRun(t, "jobs", "list"); !strings.Contains(out, "No scheduled jobs") {
@@ -223,16 +227,23 @@ func TestJobText(t *testing.T) {
 }
 
 // job is the job named name, from the daemon.
+// job is the job named name, as acmd schedule list shows it.
 func job(t *testing.T, name string) *core.Job {
 	t.Helper()
 	var found *core.Job
-	err := withClient(t.Context(), func(_ *client, snap snapshot) error {
-		var err error
-		found, err = resolveJob(snap, name)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
+	must(t, withClient(t.Context(), func(_ *client, snap snapshot) error {
+		for _, j := range snap.Jobs {
+			if j.Name == name {
+				found = j
+			}
+		}
+		return nil
+	}))
+	if found == nil {
+		t.Fatalf("no job named %q", name)
 	}
 	return found
 }
+
+// jobID is the id of the job named name: what commands take.
+func jobID(t *testing.T, name string) string { t.Helper(); return job(t, name).ID }

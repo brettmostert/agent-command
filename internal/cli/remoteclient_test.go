@@ -158,29 +158,14 @@ var sampleSessions = []*core.Session{
 var sampleBrowse = ipc.RemoteBrowse{Host: "studio", Sessions: ipc.SessionsOf(sampleSessions)}
 
 func TestResolveRemoteSession(t *testing.T) {
-	for _, tc := range []struct{ sel, want, err string }{
-		{sel: "r2", want: "r2"},
-		{sel: "1", want: "r1"},
-		{sel: "#3", want: "r3"},
-		{sel: "AUTH", want: "r1"},
-		{sel: "docs", want: "r2"}, // an exact name beats a prefix
-		{sel: "docs-", want: "r3"},
-		{sel: "au", want: "r1"},
-		{sel: "r", err: "matches more than one"},
-		{sel: "do", err: "matches more than one session on studio: docs (r2), docs-site (r3)"},
-		{sel: "9", err: "no session number 9"},
-		{sel: "#0", err: "no session number 0"},
-		{sel: "nope", err: `studio has no session "nope" (see acmd remote browse studio)`},
-		{sel: " ", err: "has no session"},
-	} {
-		s, err := resolveRemoteSession("studio", sampleSessions, tc.sel)
-		if tc.err != "" {
-			errContains(t, err, tc.err)
-			continue
-		}
-		if err != nil || s.ID != tc.want {
-			t.Errorf("%q: %v, %v; want %s", tc.sel, s, err, tc.want)
-		}
+	if s, err := resolveRemoteSession("studio", sampleSessions, " r2 "); err != nil || s.ID != "r2" {
+		t.Errorf("r2: %v, %v", s, err)
+	}
+	// Only an id: never a number, a name or a prefix.
+	for _, sel := range []string{"1", "#3", "AUTH", "docs", "au", "r", " "} {
+		_, err := resolveRemoteSession("studio", sampleSessions, sel)
+		errContains(t, err, "studio has no session")
+		errContains(t, err, "give its id (see acmd remote browse studio)")
 	}
 }
 
@@ -404,8 +389,8 @@ func TestRemoteBrowse(t *testing.T) {
 	f.reply(ipc.OpRemoteBrowse, b)
 	out := mustRun(t, "remote", "browse", "studio")
 	lines := strings.Split(out, "\n")
-	if !strings.HasPrefix(lines[0], "#  STATUS") || !strings.Contains(lines[1], "busy•") || !strings.Contains(lines[1], "auth") ||
-		!strings.Contains(lines[1], "5m") || !strings.HasSuffix(strings.TrimSpace(lines[1]), "r1") || !strings.Contains(out, "(unnamed)") {
+	if !strings.HasPrefix(lines[0], "ID  STATUS") || !strings.Contains(lines[1], "busy•") || !strings.Contains(lines[1], "auth") ||
+		!strings.Contains(lines[1], "5m") || !strings.HasPrefix(lines[1], "r1 ") || !strings.Contains(out, "(unnamed)") {
 		t.Errorf("browse:\n%s", out)
 	}
 	var got []ipc.Session
@@ -470,20 +455,22 @@ func TestRemoteAttach(t *testing.T) {
 	f := newFakeDaemon(t)
 	f.reply(ipc.OpRemoteBrowse, sampleBrowse)
 	fakeAttach(t, false, nil)
-	_, err := acmd(t, "remote", "attach", "studio", "docs")
+	_, err := acmd(t, "remote", "attach", "studio", "r2")
 	errContains(t, err, "needs a terminal")
 
 	sockets := fakeAttach(t, true, nil)
-	mustRun(t, "remote", "attach", "studio", "docs")
-	mustRun(t, "remote", "open", "studio", "#1")
+	mustRun(t, "remote", "attach", "studio", "r2")
+	mustRun(t, "remote", "open", "studio", "r1")
 	if len(*sockets) != 2 || (*sockets)[0] != f.p.HostSocket("r2") || (*sockets)[1] != f.p.HostSocket("r1") {
 		t.Errorf("attach: %v", *sockets)
 	}
 	fakeAttach(t, true, errors.New("socket gone"))
-	_, err = acmd(t, "remote", "attach", "studio", "docs")
+	_, err = acmd(t, "remote", "attach", "studio", "r2")
 	errContains(t, err, "socket gone")
-	_, err = acmd(t, "remote", "attach", "studio", "zzz")
-	errContains(t, err, `studio has no session "zzz"`)
+	for _, sel := range []string{"zzz", "docs", "#1"} {
+		_, err = acmd(t, "remote", "attach", "studio", sel)
+		errContains(t, err, `studio has no session "`+sel+`"`)
+	}
 }
 
 func TestNewOn(t *testing.T) {
@@ -503,16 +490,19 @@ func TestNewOn(t *testing.T) {
 		!f.calledWith(ipc.OpRemoteNew, `"host":"studio"`, `"dir":"~/api"`, `"harness_kind":"terminal"`, `"name":"api"`, `"prompt":"hi"`) {
 		t.Errorf("new --on:\n%s\n%v", out, f.called())
 	}
-	mustRun(t, "new", "--on", "studio", "--group", "work", "--", "fix", "it")
+	mustRun(t, "new", "--on", "studio", "--group", "g1", "--", "fix", "it")
 	if !f.calledWith(ipc.OpRemoteNew, `"dir":"~"`, `"prompt":"fix it"`, `"group_id":"g1"`) {
 		t.Errorf("new --on with a group: %v", f.called())
 	}
-	mustRun(t, "new", "--on", "studio", "--group", "New")
+	mustRun(t, "new", "--on", "studio", "--new-group", "New")
 	if !f.calledWith(ipc.OpRemoteNew, `"group_id":"g2"`) || !f.calledWith(ipc.OpMutate, `"kind":"group.create"`, `"host":"studio"`) {
 		t.Errorf("new --on created no group on studio: %v", f.called())
 	}
-	_, err := acmd(t, "new", "--on", "studio", "--group", "Nope", "--no-create")
-	errContains(t, err, `no group named "Nope"`)
+	// A group is its id on that host: here's g0 isn't studio's.
+	for _, g := range []string{"Work", "g0"} {
+		_, err := acmd(t, "new", "--on", "studio", "--group", g)
+		errContains(t, err, `studio has no group "`+g+`"`)
+	}
 	for _, args := range [][]string{
 		{"new", "--on", "studio", "--cwd", "/tmp"},
 		{"new", "--on", "studio", "--remote"},
@@ -521,7 +511,7 @@ func TestNewOn(t *testing.T) {
 		_, err := acmd(t, args...)
 		errContains(t, err, "isn't for a session on a Remote host")
 	}
-	_, err = acmd(t, "new", "--dir", "~/api")
+	_, err := acmd(t, "new", "--dir", "~/api")
 	errContains(t, err, "--dir is the folder on a Remote host")
 	_, err = acmd(t, "new", "--on", "studio", "--prompt", "a", "--", "b")
 	errContains(t, err, "not both")
@@ -560,7 +550,8 @@ func TestRemoteCompletion(t *testing.T) {
 		{[]string{"remote", "browse", "studio", ""}, nil, []string{"lab"}},
 		{[]string{"remote", "edit", ""}, []string{"studio", "lab"}, nil},
 		{[]string{"remote", "open", ""}, []string{"studio", "lab"}, nil},
-		{[]string{"remote", "open", "studio", ""}, []string{"auth\tr1", "r1\tauth", "r2\ttwo words", "r3\t(unnamed)"}, []string{"two words\t"}},
+		{[]string{"remote", "open", "studio", ""}, []string{"r1\tauth", "r2\ttwo words", "r3\t(unnamed)"}, []string{"auth\t", "two words\t"}},
+		{[]string{"attach", ""}, []string{"r1\tauth on studio", "loc\tlocal"}, []string{"L2"}},
 		{[]string{"remote", "attach", "studio", "a", ""}, nil, []string{"auth"}},
 		{[]string{"new", "--on", ""}, []string{"studio", "lab"}, nil},
 	} {
@@ -598,9 +589,9 @@ func TestListShowsTheHost(t *testing.T) {
 	t.Cleanup(func() { now = time.Now })
 	g := &core.Group{ID: "default", Name: "Default"}
 	rows := []listRow{
-		{Number: 1, Group: g, Session: &core.Session{ID: "a", Name: "auth", Kind: core.KindHosted, Host: "studio", RemoteID: "r1", Status: core.StatusBusy}},
-		{Number: 2, Group: g, Session: &core.Session{ID: "b", Name: "old", Kind: core.KindHosted, Host: "lab", RemoteID: "r9", HostGone: true, Status: core.StatusPaused}},
-		{Number: 3, Group: g, Session: &core.Session{ID: "c", Name: "here", Kind: core.KindHosted, Status: core.StatusDone}},
+		{Group: g, Session: &core.Session{ID: "a", Name: "auth", Kind: core.KindHosted, Host: "studio", RemoteID: "r1", Status: core.StatusBusy}},
+		{Group: g, Session: &core.Session{ID: "b", Name: "old", Kind: core.KindHosted, Host: "lab", RemoteID: "r9", HostGone: true, Status: core.StatusPaused}},
+		{Group: g, Session: &core.Session{ID: "c", Name: "here", Kind: core.KindHosted, Status: core.StatusDone}},
 	}
 	var b strings.Builder
 	must(t, writeListTable(&b, rows))
@@ -838,24 +829,24 @@ func TestHostFlagRunsOpsOnTheHost(t *testing.T) {
 		}
 		return nil, &ipc.RemoteError{Msg: "studio: can't", Code: "forbidden"}
 	})
-	if out := mustRun(t, "--host", "studio", "screen", "1"); out != "on the host\n" {
+	if out := mustRun(t, "--host", "studio", "screen", "h1"); out != "on the host\n" {
 		t.Errorf("screen = %q", out)
 	}
 	if out := mustRun(t, "--host", "studio", "new"); !strings.Contains(out, `Started "new"`) || !strings.Contains(inner[len(inner)-1], `"cwd":"~"`) {
 		t.Errorf("new: %s %v", out, inner)
 	}
-	mustRun(t, "--host", "studio", "rename", "1", "--to", "x")
+	mustRun(t, "--host", "studio", "rename", "h1", "--to", "x")
 	if !strings.Contains(inner[len(inner)-1], `"kind":"session.rename"`) {
 		t.Errorf("rename went as %v", inner)
 	}
-	_, err := acmd(t, "--host", "studio", "resume", "1")
+	_, err := acmd(t, "--host", "studio", "resume", "h1")
 	errContains(t, err, "studio: can't") // the host's refusal
 	_, err = acmd(t, "--host", "studio", "uninstall")
 	errContains(t, err, "acmd uninstall runs on this machine only")
 	_, err = acmd(t, "--host", "studio", "new", "--on", "lab")
 	errContains(t, err, "give one")
 	t.Setenv("ACMD_HOST", "studio")
-	if out := mustRun(t, "screen", "1"); out != "on the host\n" {
+	if out := mustRun(t, "screen", "h1"); out != "on the host\n" {
 		t.Errorf("ACMD_HOST: %q", out)
 	}
 }

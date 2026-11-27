@@ -302,14 +302,11 @@ func TestGroups(t *testing.T) {
 	if err := s.SetGroupColor(ctx, g2.ID, "green"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetGroupCollapsed(ctx, g2.ID, true); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.SetGroupSortKey(ctx, g2.ID, 1); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Group(ctx, g2.ID)
-	if got.Name != "billing v2" || got.Color != "green" || !got.Collapsed || got.SortKey != 1 {
+	if got.Name != "billing v2" || got.Color != "green" || got.SortKey != 1 {
 		t.Errorf("group after updates: %+v", got)
 	}
 	if err := s.SetGroupColor(ctx, "nope", "red"); !errors.Is(err, ErrNotFound) {
@@ -372,20 +369,6 @@ func TestMoveAndDeleteGroupKeepsSessions(t *testing.T) {
 	}
 	if err := s.DeleteGroup(ctx, "nope"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("delete missing group: %v", err)
-	}
-}
-
-func TestViewsAndViewState(t *testing.T) {
-	s, _ := open(t)
-	if vs, err := s.ViewState(ctx); err != nil || vs.Mode != "groups" || vs.Sort != "created" {
-		t.Fatalf("default view state: %+v %v", vs, err)
-	}
-	want := core.ViewState{Mode: "list", Sort: "activity", Desc: true, Filter: "g:proj", ShowArchived: true}
-	if err := s.PutViewState(ctx, want); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := s.ViewState(ctx); !reflect.DeepEqual(got, want) {
-		t.Errorf("view state: %+v", got)
 	}
 }
 
@@ -717,15 +700,47 @@ func TestSessionJobMigration(t *testing.T) {
 	}
 }
 
-// A view state saved while the daemon kept focus mode still loads.
-func TestViewStateFromBeforeFocusModeWent(t *testing.T) {
-	s, _ := open(t)
-	if _, err := s.q.ExecContext(ctx, `INSERT INTO view_state (id, state) VALUES (1, ?)`,
-		`{"Mode":"groups","Sort":"name","FocusedGroup":"g1","PreFocus":{"g2":true}}`); err != nil {
-		t.Fatal(err)
+// A store from when the daemon kept a view keeps its groups: the view and
+// the groups' collapse go (PAN-192).
+func TestNoViewStateMigration(t *testing.T) {
+	orig := migrations
+	t.Cleanup(func() { migrations = orig })
+	migrations = func() ([]migration, error) {
+		ms, err := orig()
+		var before []migration
+		for _, m := range ms {
+			if m.name < "0025" {
+				before = append(before, m)
+			}
+		}
+		return before, err
 	}
-	if vs, err := s.ViewState(ctx); err != nil || vs.Mode != "groups" || vs.Sort != "name" {
-		t.Errorf("view state: %+v %v", vs, err)
+	p := filepath.Join(t.TempDir(), "state.db")
+	old, err := Open(ctx, p)
+	must(t, err)
+	for _, q := range []string{
+		`INSERT INTO groups (id, name, color, sort_key, collapsed, created_at, path, parent_id) VALUES ('g1', 'work', 'blue', 10, 1, 1, '/w', '')`,
+		`INSERT INTO groups (id, name, color, sort_key, collapsed, created_at, path, parent_id) VALUES ('g2', 'api', 'red', 20, 0, 2, '', 'g1')`,
+		`INSERT INTO view_state (id, state) VALUES (1, '{"Mode":"list"}')`,
+	} {
+		if _, err := old.db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	old.Close()
+
+	migrations = orig
+	s, err := Open(ctx, p)
+	must(t, err)
+	defer s.Close()
+	gs, err := s.Groups(ctx, true)
+	if err != nil || len(gs) != 2 || gs[0].Name != "work" || gs[0].Path != "/w" || gs[1].ParentID != "g1" || gs[1].SortKey != 20 {
+		t.Fatalf("groups after: %+v %v", gs, err)
+	}
+	var n int
+	must(t, s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name = 'view_state'`).Scan(&n))
+	if n != 0 {
+		t.Error("the view_state table is still there")
 	}
 }
 

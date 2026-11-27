@@ -244,9 +244,8 @@ func TestStoreApplyEntities(t *testing.T) {
 	if _, err := store.Apply(ipc.Event{Rev: 17, Type: ipc.EventAdded, Entity: ipc.EntityInbox, ID: "42", Data: inData}); err != nil {
 		t.Fatalf("inbox add: %v", err)
 	}
-	vsData, _ := json.Marshal(ipc.ViewState{Mode: "list", Sort: "name"})
-	if _, err := store.Apply(ipc.Event{Rev: 18, Type: ipc.EventUpdated, Entity: ipc.EntityView, Data: vsData}); err != nil {
-		t.Fatalf("view update: %v", err)
+	if _, err := store.Apply(ipc.Event{Rev: 18, Type: ipc.EventUpdated, Entity: ipc.EntitySettings, Data: []byte(`{"theme":"Default"}`)}); err != nil {
+		t.Fatalf("settings update: %v", err)
 	}
 	settsData, _ := json.Marshal(map[string]any{"theme": "Tokyo Night"})
 	if _, err := store.Apply(ipc.Event{Rev: 19, Type: ipc.EventUpdated, Entity: ipc.EntitySettings, Data: settsData}); err != nil {
@@ -274,8 +273,8 @@ func TestStoreApplyEntities(t *testing.T) {
 		t.Fatalf("unexpected entity counts: harnesses=%d inbox=%d sets=%d groups=%d",
 			len(snap.Harnesses), len(snap.Inbox), len(snap.Sets), len(snap.Groups))
 	}
-	if snap.ViewState.Mode != "list" || snap.Settings["theme"] != "Tokyo Night" || len(snap.Health) != 1 {
-		t.Fatalf("unexpected view/settings/health: %+v %+v %+v", snap.ViewState, snap.Settings, snap.Health)
+	if snap.Settings["theme"] != "Tokyo Night" || len(snap.Health) != 1 {
+		t.Fatalf("unexpected settings/health: %+v %+v", snap.Settings, snap.Health)
 	}
 	if len(snap.Notices) != 1 || snap.Notices[0].Seq != 5 {
 		t.Fatalf("unexpected notices: %+v", snap.Notices)

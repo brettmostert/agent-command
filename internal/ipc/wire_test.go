@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,7 @@ func sampleSnapshot() Snapshot {
 			Host: "studio", RemoteID: "r9", JobID: "j1", CreatedAt: at},
 	}
 	groups := []*core.Group{
-		{ID: "g1", Name: "Backend", Color: "blue", SortKey: 10, CreatedAt: at, Collapsed: true},
+		{ID: "g1", Name: "Backend", Color: "blue", SortKey: 10, CreatedAt: at},
 		{ID: "g2", Name: "Docs", SortKey: 20, CreatedAt: at},
 	}
 	job := &core.Job{ID: "j1", JobSpec: core.JobSpec{Name: "nightly", GroupID: "g1", Schedule: "0 2 * * *", Prompt: "Run the tests",
@@ -47,11 +48,10 @@ func sampleSnapshot() Snapshot {
 	inFolder := &Session{Type: EntitySession, ID: "s5", Name: "lint", Parent: "f1", Cwd: "/w/api", Status: core.StatusDone,
 		Kind: core.KindHosted, HarnessKind: core.HarnessTerminal, CreatedAt: at}
 	return Snapshot{
-		Sessions:  append(SessionsOf(sessions), inFolder),
-		Groups:    GroupsOf(groups),
-		Sets:      []Set{{Type: EntitySet, ID: "set1", Parent: "g1"}},
-		Others:    []json.RawMessage{folder},
-		ViewState: ViewStateOf(core.ViewState{Mode: "groups", Sort: "activity", Desc: true, Collapsed: []string{"g1"}}),
+		Sessions: append(SessionsOf(sessions), inFolder),
+		Groups:   GroupsOf(groups),
+		Sets:     []Set{{Type: EntitySet, ID: "set1", Parent: "g1"}},
+		Others:   []json.RawMessage{folder},
 		Inbox: []core.InboxItem{{ID: 1, SessionID: "s1", Kind: "permission", Text: "Allow Bash: make test?", Options: []string{"Yes", "No"},
 			At: at.Add(time.Minute), State: "open"}},
 		Jobs: []*core.Job{job},
@@ -184,7 +184,7 @@ func TestTheSnapshotBackAsCore(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(back.Sessions, snap.Sessions) || !reflect.DeepEqual(back.Groups, snap.Groups) || !reflect.DeepEqual(back.ViewState, snap.ViewState) {
+	if !reflect.DeepEqual(back.Sessions, snap.Sessions) || !reflect.DeepEqual(back.Groups, snap.Groups) {
 		t.Errorf("round trip:\n%+v\n%+v", back.Sessions[0], snap.Sessions[0])
 	}
 	ss := back.CoreSessions()
@@ -192,13 +192,13 @@ func TestTheSnapshotBackAsCore(t *testing.T) {
 		t.Errorf("sessions: %+v %+v", ss[0], ss[1])
 	}
 	gs := back.CoreGroups()
-	if !gs[0].Collapsed || gs[0].SortKey != 10 || gs[1].Collapsed || gs[1].SortKey != 20 {
+	if gs[0].SortKey != 10 || gs[0].Color != "blue" || gs[1].SortKey != 20 {
 		t.Errorf("groups: %+v %+v", gs[0], gs[1])
 	}
 	if back.Groups[0].Type != "group" || back.Groups[1].Order != 20 || back.Sessions[2].GroupID != "" || back.Sessions[2].Parent != "" {
 		t.Errorf("group wire: %+v", back.Groups)
 	}
-	if vs := back.ViewState.Core(); vs.Sort != "activity" || !vs.Desc || vs.Collapsed[0] != "g1" {
-		t.Errorf("view: %+v", vs)
+	if strings.Contains(string(b), "view_state") || strings.Contains(string(b), "collapsed") {
+		t.Error("the snapshot carries a view: each client keeps its own")
 	}
 }

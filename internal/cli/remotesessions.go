@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/brettmostert/agent-command/internal/config"
+	"github.com/brettmostert/agent-command/internal/core"
 	"github.com/brettmostert/agent-command/internal/ipc"
 	"github.com/brettmostert/agent-command/internal/paths"
 )
@@ -29,7 +30,7 @@ func newRemoteSetCmd(on bool) *cobra.Command {
 		use, short = "off", "Make sessions local: clients attached to them are dropped at once"
 	}
 	return &cobra.Command{
-		Use:   use + " <N|id|name-prefix>...",
+		Use:   use + " <id>...",
 		Short: short,
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,10 +93,8 @@ func newRemoteSessionsCmd() *cobra.Command {
 				if snap.Remote != nil && snap.Remote.Listening {
 					host.Port = snap.Remote.Port // the one in use: the fallback may have picked another
 				}
-				vs := snap.ViewState
-				vs.Filter, vs.ShowArchived = "", false
 				var rows []listRow
-				for _, r := range listRows(snap, vs) {
+				for _, r := range listRows(snap, core.ViewState{Mode: "groups", Sort: "created"}) {
 					if r.Session.Remote {
 						rows = append(rows, r)
 					}
@@ -150,13 +149,9 @@ func writeRemoteTable(w io.Writer, host config.RemoteHost, rows []listRow, attac
 	}
 	fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tSTATUS\tNAME\tDIR\tCLIENTS")
+	fmt.Fprintln(tw, "ID\tSTATUS\tNAME\tDIR\tCLIENTS")
 	for _, r := range rows {
-		num := "-"
-		if r.Number > 0 {
-			num = fmt.Sprint(r.Number)
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", num, r.Session.Status, display(r.Session.Name, 40), filepath.Base(r.Session.Cwd),
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", r.Session.ID, r.Session.Status, display(r.Session.Name, 40), filepath.Base(r.Session.Cwd),
 			attached[r.Session.ID])
 	}
 	return tw.Flush()
@@ -169,7 +164,6 @@ type remoteJSON struct {
 }
 
 type remoteSession struct {
-	Number int    `json:"number,omitempty"`
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Status string `json:"status"`
@@ -185,7 +179,7 @@ func writeRemoteJSON(w io.Writer, host config.RemoteHost, rows []listRow, attach
 	}
 	for _, r := range rows {
 		s := r.Session
-		out.Sessions = append(out.Sessions, remoteSession{Number: r.Number, ID: s.ID, Name: s.Name, Status: string(s.Status), Cwd: s.Cwd,
+		out.Sessions = append(out.Sessions, remoteSession{ID: s.ID, Name: s.Name, Status: string(s.Status), Cwd: s.Cwd,
 			Clients: attached[s.ID]})
 	}
 	enc := json.NewEncoder(w)

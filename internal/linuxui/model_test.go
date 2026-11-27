@@ -24,10 +24,9 @@ func TestBuildSidebarAndFinders(t *testing.T) {
 		Harnesses: []ipc.Harness{
 			{ID: "h1", Name: "Claude Work", Kind: core.HarnessClaude, Title: "Claude", Installed: true},
 		},
-		ViewState: ipc.ViewState{Mode: "groups", Sort: "created"},
 	}
 
-	m := BuildSidebar(snap, "")
+	m := BuildSidebar(snap, "", nil)
 	if len(m.Rows) != 4 {
 		t.Fatalf("expected 4 rows (2 headers + 2 sessions), got %d", len(m.Rows))
 	}
@@ -35,9 +34,18 @@ func TestBuildSidebarAndFinders(t *testing.T) {
 		t.Fatalf("unexpected first rows: %+v", m.Rows[:2])
 	}
 
-	filtered := BuildSidebar(snap, "docs")
+	filtered := BuildSidebar(snap, "docs", nil)
 	if len(filtered.Rows) != 2 || filtered.Rows[1].Session.ID != "s2" {
 		t.Fatalf("unexpected filtered rows: %+v", filtered.Rows)
+	}
+
+	// Collapse is the Linux UI's own view: a collapsed group hides its sessions.
+	collapsed := toggleCollapsed(nil, "g1")
+	if m := BuildSidebar(snap, "", collapsed); len(m.Rows) != 3 || !m.Rows[0].Collapsed {
+		t.Fatalf("collapsed: %+v", m.Rows)
+	}
+	if got := toggleCollapsed(collapsed, "g1"); len(got) != 0 || len(collapsed) != 1 {
+		t.Fatalf("toggled back: %v (was %v)", got, collapsed)
 	}
 
 	if h, ok := FindHarness(snap, "h1"); !ok || h.Name != "Claude Work" {

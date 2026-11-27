@@ -22,7 +22,7 @@ private func session(_ id: String, _ name: String = "", status: String = "busy")
         "id": 4, "session_id": "a", "kind": "done", "text": "t", "state": "open", "at": "2026-11-22T00:00:00Z", "read": false,
     ]
     do { let ok = state.apply(["rev": 10, "type": "added", "entity": "inbox", "id": "4", "data": item]); #expect(ok) }
-    do { let ok = state.apply(["rev": 11, "type": "updated", "entity": "view", "data": ["mode": "list", "sort": "name"]]); #expect(ok) }
+    do { let ok = state.apply(["rev": 11, "type": "updated", "entity": "settings", "data": ["theme": "Tokyo Night"]]); #expect(ok) }
     let snap = try state.snapshot()
     #expect(snap.sessions?.map(\.id) == ["a", "b"] && snap.sessions?.first?.name == "renamed" && snap.sessions?.first?.status == "done")
     #expect(snap.groups?.isEmpty == true && snap.dismissed == ["hooks"] && snap.inbox?.first?.itemID == 4)

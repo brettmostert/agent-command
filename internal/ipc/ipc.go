@@ -237,8 +237,7 @@ type Snapshot struct {
 	// doesn't know it still sees its type, id, host, parent and order, and
 	// draws its children under their nearest ancestor of a type it knows.
 	// Each is a JSON object with those common fields and its own.
-	Others    []json.RawMessage `json:"others,omitempty"`
-	ViewState ViewState         `json:"view_state"`
+	Others []json.RawMessage `json:"others,omitempty"`
 	// Notices are the most recent notifications, oldest first.
 	Notices []Notice `json:"notices,omitempty"`
 	// Inbox is the queue: the items still to deal with, in arrival order.
@@ -305,12 +304,7 @@ const (
 	MutGroupDelete    = "group.delete"      // GroupID
 	MutGroupArchive   = "group.archive"     // GroupID (archives its sessions too)
 	MutGroupUnarchive = "group.unarchive"   // GroupID, Flag = also unarchive sessions, Text = come back under this name
-	MutGroupCollapse  = "group.collapse"    // GroupID ("" = all), Flag = collapsed
 	MutGroupMove      = "group.move"        // GroupID, After or Before: the group it goes next to
-	MutViewMode       = "view.mode"         // Text: groups|list
-	MutViewSort       = "view.sort"         // Text: key, Flag = descending
-	MutViewFilter     = "view.filter"       // Text
-	MutViewArchived   = "view.archived"     // Flag = show archived
 	MutInboxRead      = "inbox.read"        // ItemIDs, Flag = read (else unread)
 	MutInboxDismiss   = "inbox.dismiss"     // ItemIDs: take them out of the queue
 	MutPurge          = "session.purge"     // IDs: archived sessions to delete for good (claude rm) -> returns the count

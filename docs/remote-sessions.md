@@ -102,8 +102,8 @@ On the client:
 - **CLI:**
 
   ```sh
-  acmd remote browse studio          # its sessions, numbered
-  acmd remote attach studio 1        # attach this terminal; Ctrl+] detaches
+  acmd remote browse studio          # its sessions, with their ids
+  acmd remote attach studio <id>     # attach this terminal; Ctrl+] detaches
   ```
 
 **Notifications** follow you: a host shows each notification on the machine you're using, as `notify.route` says (`one`, the default, or `all`). Each paired machine counts as one client there, active while you use any of its apps, and passes the notification on to its app you're using. A change you make from a machine is recorded on the host with the app that made it.
@@ -176,7 +176,7 @@ On Windows, acmd only connects to hosts. It runs no sessions of its own, and Hos
 
 3. On the host, approve the request (step 3 of the [quick start](#3-on-the-host-approve-the-request)).
 
-4. Use the host's sessions: `acmd list` shows them, `acmd attach <#|name>` attaches this terminal to one (Ctrl+] detaches), `acmd inbox` answers what's waiting, and `acmd watch` shows notices as they come.
+4. Use the host's sessions: `acmd list` shows them, `acmd attach <id>` attaches this terminal to one (Ctrl+] detaches), `acmd inbox` answers what's waiting, and `acmd watch` shows notices as they come.
 
 What Windows can't do, and why:
 
@@ -385,7 +385,7 @@ On either:
 | `identity [--json] [--regenerate [-y]]` | This Mac's fingerprints and certs, for each role. `--regenerate` makes a new identity. |
 | `cert host\|client (<cert-file> <key-file> \| --default)` | Uses your own cert and key for a role, or acmd's identity again. |
 
-A session on a host can be named by its number in `browse`, its id on the host, its name, or a unique start of its name or id. `acmd list` shows where each session runs: `↗ studio` for one added from a host.
+A session on a host is named by its id on the host, as `browse` shows it: never its name or its place in a list. `acmd list` shows where each session runs: `↗ studio` for one added from a host.
 
 **Exit codes**, when a Remote host can't be used (also in `acmd --help`, with the others, and in the README):
 

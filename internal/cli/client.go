@@ -124,17 +124,17 @@ func (c *client) snapshot() (snapshot, error) {
 	return snapshotOf(s), err
 }
 
-// snapshot is the daemon's snapshot with its sessions, groups and view as
-// internal/core has them, for the CLI's layout and lookups.
+// snapshot is the daemon's snapshot with its sessions and groups as
+// internal/core has them, for the CLI's layout and lookups. The view is
+// the command's own: the daemon keeps none.
 type snapshot struct {
 	ipc.Snapshot
-	Sessions  []*core.Session `json:"-"`
-	Groups    []*core.Group   `json:"-"`
-	ViewState core.ViewState  `json:"-"`
+	Sessions []*core.Session `json:"-"`
+	Groups   []*core.Group   `json:"-"`
 }
 
 func snapshotOf(s ipc.Snapshot) snapshot {
-	return snapshot{Snapshot: s, Sessions: s.CoreSessions(), Groups: s.CoreGroups(), ViewState: s.ViewState.Core()}
+	return snapshot{Snapshot: s, Sessions: s.CoreSessions(), Groups: s.CoreGroups()}
 }
 
 // A kind that changes many sessions answers a result for each; with no out
@@ -174,59 +174,45 @@ func withClient(cmdCtx context.Context, fn func(*client, snapshot) error) error 
 	return fn(c, snap)
 }
 
-// resolveSession finds a session by number (current view), id, short id,
-// Claude id or unique name prefix.
-func resolveSession(snap snapshot, sel string) (*core.Session, error) {
-	rows := core.Layout(snap.Sessions, snap.Groups, snap.ViewState)
-	return core.Resolve(rows, snap.Sessions, sel)
+// resolveSession finds a session by its acmd id or its Claude session id.
+// Nothing else picks one: acmd find turns a name into ids.
+func resolveSession(snap snapshot, id string) (*core.Session, error) {
+	return core.Resolve(snap.Sessions, id)
 }
 
-// resolveGroup finds a live group by id or case-insensitive name.
-func resolveGroup(snap snapshot, sel string) (*core.Group, error) {
-	return resolveGroupOn(snap, sel, "")
+// resolveGroup finds one of this machine's groups by its id.
+func resolveGroup(snap snapshot, id string) (*core.Group, error) {
+	return resolveGroupOn(snap, id, "")
 }
 
 // resolveGroupOn is resolveGroup among host's groups ("" for this
-// machine's): ids are unique only within their host, and every host has a
-// Default.
-func resolveGroupOn(snap snapshot, sel, host string) (*core.Group, error) {
-	sel = strings.TrimSpace(sel)
+// machine's): ids are unique only within their host. Nothing but an id
+// picks a group: acmd group find turns a name into ids.
+func resolveGroupOn(snap snapshot, id, host string) (*core.Group, error) {
+	id = strings.TrimSpace(id)
 	for _, g := range snap.Groups {
-		if g.Host == host && g.ID == sel {
-			return g, nil
-		}
-	}
-	for _, g := range snap.Groups {
-		if g.Host == host && g.ArchivedAt.IsZero() && strings.EqualFold(g.Name, sel) {
+		if g.Host == host && g.ID == id {
 			return g, nil
 		}
 	}
 	if host != "" {
-		return nil, fmt.Errorf("no group named %q on %s", sel, host)
+		return nil, fmt.Errorf("%s has no group %q: give its id (acmd group find <name> finds it)", host, id)
 	}
-	return nil, fmt.Errorf("no group named %q", sel)
+	return nil, fmt.Errorf("no group %q: give its id (acmd group find <name> finds it)", id)
 }
 
-// liveGroupOn is resolveGroupOn for a group sessions go into. An archived
-// group is refused, by id or by name, before anything is sent: making a
-// new group with its name would leave it no name to come back to.
-func liveGroupOn(snap snapshot, sel, host string) (*core.Group, error) {
-	g, err := resolveGroupOn(snap, sel, host)
-	if err == nil && g.ArchivedAt.IsZero() {
-		return g, nil
+// liveGroupOn is resolveGroupOn for a group sessions go into: an archived
+// one is refused before anything is sent.
+func liveGroupOn(snap snapshot, id, host string) (*core.Group, error) {
+	g, err := resolveGroupOn(snap, id, host)
+	if err != nil {
+		return nil, err
 	}
-	sel = strings.TrimSpace(sel)
-	for _, a := range snap.Groups {
-		if a.Host == host && !a.ArchivedAt.IsZero() && (a.ID == sel || strings.EqualFold(a.Name, sel)) {
-			return nil, archivedGroupError{fmt.Errorf("%s is archived: unarchive it first (acmd group unarchive %s)", a.Name, shellQuote(a.Name))}
-		}
+	if !g.ArchivedAt.IsZero() {
+		return nil, fmt.Errorf("%s is archived: unarchive it first (acmd group unarchive %s)", g.Name, g.ID)
 	}
-	return nil, err
+	return g, nil
 }
-
-// archivedGroupError is liveGroupOn's refusal: it's never an invitation to
-// make the group.
-type archivedGroupError struct{ error }
 
 // confirm asks a yes/no question on a terminal; without a terminal it
 // requires --yes.

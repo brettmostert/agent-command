@@ -37,7 +37,7 @@ Pair another Agent Command with this one, and it shows this Mac's sessions, grou
 
 ## Scripting with acmd
 
-Every command that reads or changes state takes `--json`, which prints the answer of the daemon op it runs, in the daemon's wire types (`internal/ipc`), and nothing else. A command that runs several ops prints one answer per line. `acmd events` follows the daemon as it changes: a snapshot, then each session, group, inbox item, job or setting added, updated or removed, one JSON event per line (`--types` to pick, `--since` to resume). Errors go to stderr as `{"error": {"code": "…", "message": "…"}}`. Name sessions by id in scripts: the numbers `acmd list` shows follow the list's order, which changes.
+Every command that reads or changes state takes `--json`, which prints the answer of the daemon op it runs, in the daemon's wire types (`internal/ipc`), and nothing else. A command that runs several ops prints one answer per line. `acmd events` follows the daemon as it changes: a snapshot, then each session, group, inbox item, job or setting added, updated or removed, one JSON event per line (`--types` to pick, `--since` to resume). Errors go to stderr as `{"error": {"code": "…", "message": "…"}}`. Commands take ids, never names or numbers in a list: `acmd list` shows each session's id, and `acmd find <name>` (or `acmd group find <name>`) prints the ids of those whose name has it. How `acmd list` lays sessions out is its own flags' (`--mode`, `--sort`, `--desc`, `--archived`, `--filter`): the daemon keeps no view, and each client keeps its own.
 
 **`acmd` on its own** opens a UI. That's the app when this machine has one and you're at it: the Mac app, or the Linux UI on a desktop. Otherwise it's the terminal UI: over SSH, on Windows, or on a machine with no screen. `acmd --app` and `acmd --terminal` choose. The terminal UI lists the sessions here, then each host's, grouped as in the app's sidebar, with what's waiting:
 
@@ -52,8 +52,8 @@ When no app or terminal client shows a notice, the OS does, where there's a desk
 
 From any terminal, on macOS, Linux and Windows:
 
-- **`acmd attach <#|id|name>`** attaches this terminal to a session, one here or a host's as `acmd list` shows it. Ctrl+] detaches. With `--host`, it picks among that host's own sessions.
-- **`acmd inbox`** lists what's waiting: permission prompts, questions and finished turns, here and on your hosts. `acmd inbox answer <item> <option>` answers one, by an option's number or text, or with a reply to a finished turn. `acmd inbox dismiss <item>` clears one.
+- **`acmd attach <id>`** attaches this terminal to a session, one here or a host's as `acmd list` shows it (`acmd attach $(acmd find api)`). Ctrl+] detaches. With `--host`, it picks among that host's own sessions.
+- **`acmd inbox`** lists what's waiting: permission prompts, questions and finished turns, here and on your hosts. `acmd inbox answer <item> <option>` answers one, the item by its id (or `host:id`), by an option's number or text, or with a reply to a finished turn. `acmd inbox dismiss <item>` clears one.
 - **`acmd watch`** prints each notice as it comes, one line each, and rings the bell (`--json`: one event per line).
 
 While attach and watch run, they count as this machine's terminal client, so `notify.route = "one"` sends notices to the terminal you're using.

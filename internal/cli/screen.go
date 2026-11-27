@@ -14,11 +14,11 @@ import (
 func newScreenCmd() *cobra.Command {
 	var lines int
 	cmd := &cobra.Command{
-		Use:   "screen <N|id|name-prefix>",
+		Use:   "screen <id>",
 		Short: "Print what a session's terminal shows, as plain text",
 		Long: "Prints a session's screen and recent history. --lines keeps the last lines only. Sessions on this\n" +
 			"host only, for now: one added from a Remote host says its host can't send it yet.",
-		Example: "  acmd screen 2\n  acmd screen api --lines 20\n  acmd screen 2 --json",
+		Example: "  acmd screen <id>\n  acmd screen <id> --lines 20\n  acmd screen $(acmd find api) --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {

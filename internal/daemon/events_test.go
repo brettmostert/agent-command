@@ -97,13 +97,6 @@ func TestTheStreamSendsEntities(t *testing.T) {
 	if removed := s.until("the delete", is(ipc.EventRemoved, ipc.EntityGroup)); removed.ID != g || len(removed.Data) != 0 {
 		t.Errorf("removed = %+v", removed)
 	}
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewSort, Text: "name"})
-	view := s.until("the view", is(ipc.EventUpdated, ipc.EntityView))
-	var vs ipc.ViewState
-	must(t, json.Unmarshal(view.Data, &vs))
-	if vs.Sort != "name" || view.ID != "" {
-		t.Errorf("view = %+v", vs)
-	}
 	// A client's own dismissed warnings, to it alone.
 	must(t, c.Call(ipc.OpHealthDismiss, ipc.HealthRef{ClientID: "mac-1", ID: "hooks"}, nil))
 	if d := s.until("dismissed", is(ipc.EventUpdated, ipc.EntityDismissed)); string(d.Data) != `["hooks"]` {
@@ -153,7 +146,6 @@ func TestTheStreamResumes(t *testing.T) {
 	if snap.Snapshot == nil || len(snap.Snapshot.Groups) == 0 || snap.Snapshot.Settings != nil || snap.Snapshot.Health != nil {
 		t.Errorf("groups only: %+v", snap.Snapshot)
 	}
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewSort, Text: "created"})
 	groupNamed(t, c, "Three")
 	if ev := only.next(); ev.Entity != ipc.EntityGroup {
 		t.Errorf("not a group: %+v", ev)

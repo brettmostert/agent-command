@@ -22,7 +22,7 @@ func TestRemoteSessionsCommands(t *testing.T) {
 		t.Errorf("no Remote sessions:\n%s", out)
 	}
 
-	out = mustRun(t, "remote", "on", "1", "fix")
+	out = mustRun(t, "remote", "on", "c-auth", "c-flaky")
 	for _, want := range []string{`"refactor auth middleware" is Remote.`, `"fix flaky e2e test" is Remote.`, hostingOffNote} {
 		if !strings.Contains(out, want) {
 			t.Errorf("remote on lacks %q:\n%s", want, out)
@@ -43,13 +43,13 @@ func TestRemoteSessionsCommands(t *testing.T) {
 		t.Errorf("a local session is listed:\n%s", out)
 	}
 
-	if out := mustRun(t, "remote", "off", "refactor"); out != "\"refactor auth middleware\" is local.\n" {
+	if out := mustRun(t, "remote", "off", "c-auth"); out != "\"refactor auth middleware\" is local.\n" {
 		t.Errorf("remote off: %q", out)
 	}
 
 	// With Hosting on: where it listens, and no note.
 	must(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[remote.host]\nenabled = true\nlisten = \"all\"\n"), 0o600))
-	if out := mustRun(t, "remote", "on", "docs"); strings.Contains(out, hostingOffNote) {
+	if out := mustRun(t, "remote", "on", "c-docs"); strings.Contains(out, hostingOffNote) {
 		t.Errorf("the Hosting note with Hosting on:\n%s", out)
 	}
 	out = mustRun(t, "remote", "sessions")
@@ -120,12 +120,12 @@ func TestRemoteSessionsClients(t *testing.T) {
 	if attached["a"] != 2 || attached["b"] != 1 || attached["c"] != 0 {
 		t.Errorf("counts = %v", attached)
 	}
-	rows := []listRow{{Number: 1, Session: &core.Session{ID: "a", Name: "api", Status: core.StatusBusy, Cwd: "/w/api"}},
+	rows := []listRow{{Session: &core.Session{ID: "a", Name: "api", Status: core.StatusBusy, Cwd: "/w/api"}},
 		{Session: &core.Session{ID: "c", Name: "web", Status: core.StatusDone, Cwd: "/w/web"}}}
 	host := config.RemoteHost{Enabled: true, Listen: "localhost", Port: 7433}
 	var b strings.Builder
 	must(t, writeRemoteTable(&b, host, rows, attached))
-	for _, want := range []string{"1  busy    api   api  2", "-  done    web   web  0"} {
+	for _, want := range []string{"ID  STATUS", "a   busy    api   api  2", "c   done    web   web  0"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("table lacks %q:\n%s", want, b.String())
 		}

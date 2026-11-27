@@ -15,7 +15,7 @@ import (
 
 // `acmd inbox`: what's waiting for you, here and on your hosts, answered or
 // cleared through the daemon's Inbox ops (so inbox.permission_answers holds).
-// An item is its number in the list, its id here, or host:id for a host's.
+// An item is its id here, or host:id for a host's: never its place in the list.
 
 func newInboxCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -23,7 +23,7 @@ func newInboxCmd() *cobra.Command {
 		Short: "List what's waiting for you: permission prompts, questions and finished turns",
 		Long: "Lists the Inbox, here and on your hosts, in the order it came: permission prompts, questions,\n" +
 			"finished turns and errors, each with its session, host and options. Answer one with acmd inbox\n" +
-			"answer, or clear it with acmd inbox dismiss. An item is its number here, its id, or host:id.",
+			"answer, or clear it with acmd inbox dismiss. An item is its id here, or host:id for a host's.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withClient(cmd.Context(), func(_ *client, snap snapshot) error {
@@ -105,10 +105,10 @@ func inboxItems(snap snapshot) []core.InboxItem {
 	return out
 }
 
-// resolveInboxItem finds sel: a number in the list (from 1), an id here, or
-// host:id.
+// resolveInboxItem finds sel: an id here, or host:id. A place in the list
+// is never one: the list changes.
 func resolveInboxItem(items []core.InboxItem, sel string) (core.InboxItem, error) {
-	sel = strings.TrimPrefix(strings.TrimSpace(sel), "#")
+	sel = strings.TrimSpace(sel)
 	if host, id, ok := strings.Cut(sel, ":"); ok {
 		n, err := strconv.ParseInt(id, 10, 64)
 		if err == nil {
@@ -122,10 +122,7 @@ func resolveInboxItem(items []core.InboxItem, sel string) (core.InboxItem, error
 	}
 	n, err := strconv.ParseInt(sel, 10, 64)
 	if err != nil {
-		return core.InboxItem{}, usageError{fmt.Errorf("an item is its number in acmd inbox, its id, or host:id, not %q", sel)}
-	}
-	if n >= 1 && int(n) <= len(items) {
-		return items[n-1], nil
+		return core.InboxItem{}, usageError{fmt.Errorf("an item is its id in acmd inbox, or host:id, not %q", sel)}
 	}
 	for _, it := range items {
 		if it.Host == "" && it.ID == n {
@@ -133,6 +130,14 @@ func resolveInboxItem(items []core.InboxItem, sel string) (core.InboxItem, error
 		}
 	}
 	return core.InboxItem{}, fmt.Errorf("no Inbox item %s is waiting: see acmd inbox", sel)
+}
+
+// inboxRef is how commands name it: its id, or host:id for a host's.
+func inboxRef(it core.InboxItem) string {
+	if it.Host != "" {
+		return fmt.Sprintf("%s:%d", it.Host, it.ID)
+	}
+	return fmt.Sprint(it.ID)
 }
 
 // inboxAnswer is how answer answers it: an option for a prompt or a question,
@@ -199,8 +204,8 @@ func writeInbox(w io.Writer, snap snapshot, items []core.InboxItem) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tSESSION\tHOST\tKIND\tWAITING")
-	for i, it := range items {
+	fmt.Fprintln(tw, "ID\tSESSION\tHOST\tKIND\tWAITING")
+	for _, it := range items {
 		name := it.SessionID
 		if s := sessionOf(snap, it); s != nil && s.Name != "" {
 			name = s.Name
@@ -209,7 +214,7 @@ func writeInbox(w io.Writer, snap snapshot, items []core.InboxItem) {
 		if len(it.Options) > 0 {
 			text += "  (" + optionList(it.Options) + ")"
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", i+1, name, cmpOr(it.Host, "-"), it.Kind, text)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", inboxRef(it), name, cmpOr(it.Host, "-"), it.Kind, text)
 	}
 	_ = tw.Flush()
 }
