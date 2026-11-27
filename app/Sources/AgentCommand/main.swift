@@ -629,10 +629,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    /// A folder's path, where a new session in it starts the chooser.
-    private static func startPath(_ group: NewSessionGroup) -> String? {
-        if case .existing(let found?) = group, found.isFolder { return found.path }
-        return nil
+    /// Where a new session in group starts the folder chooser: a folder's
+    /// path; for a group, the closest path (SidebarLayout.closestPath).
+    private func startPath(_ group: NewSessionGroup) -> String? {
+        guard case .existing(let found?) = group else { return nil }
+        return SidebarLayout.closestPath(found, groups: store.groups, sessions: store.sessions)
     }
 
     /// Asks for a folder, on host ("" is this Mac), starting at start: the
@@ -726,7 +727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// The host's folders, for a session on it. It's created there, Remote, and shown here.
     private func chooseRemoteFolder(host: String, harness: Harness, group: NewSessionGroup = .existing(nil)) {
         let chooser = RemoteFolderChooser(host: host, client: store.remoteClient)
-        chooser.startPath = Self.startPath(group)
+        chooser.startPath = startPath(group)
         chooser.choose = { [weak self, weak chooser] dir in
             self?.withGroup(group, on: host, at: dir) { id in
                 self?.store.newRemoteSession(host: host, dir: dir, harness: harness, group: id, done: { failure in
@@ -762,7 +763,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.allowsMultipleSelection = false
         panel.prompt = harness.panelPrompt
         panel.message = "Choose the folder for the new session"
-        panel.directoryURL = Self.startPath(group).map { URL(fileURLWithPath: $0) } ?? lastFolder
+        panel.directoryURL = startPath(group).map { URL(fileURLWithPath: $0) } ?? lastFolder
         let remoteBox = NSButton(
             checkboxWithTitle: "Remote: other Agent Commands using this Mac's Hosting can see and use it", target: nil, action: nil)
         if asksRemote {
@@ -1313,6 +1314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case .newFolder(let sessions): showNewFolder(sessions)
         case .chooseGroupPath(let key): chooseGroupPath(key)
         case .clearGroupPath(let key): store.setGroupPath(key, nil)
+        case .nestGroup(let key, let parent): store.nestGroup(key, into: parent)
         case .moveToNoGroup(let sessions):
             store.moveToNoGroup(sessions.map(\.id))
             store.clearMarks()

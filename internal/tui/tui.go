@@ -323,7 +323,7 @@ func (m *Model) build() {
 				}
 				title := r.Title()
 				if r.Group != nil { // ▤ a folder, ● a group; No group has neither
-					title = r.Group.KindMark() + " " + title
+					title = strings.Repeat("  ", r.Depth) + r.Group.KindMark() + " " + title
 				}
 				m.rows = append(m.rows, row{group: fmt.Sprintf("%s (%d)", title, r.Count), host: host})
 				continue

@@ -123,7 +123,9 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutMove:
 		return nil, st.MoveSessions(ctx, m.GroupID, m.LocalIDs...)
 	case ipc.MutGroupCreate:
-		return d.createGroup(ctx, m.Text, m.Color, m.Path)
+		return d.createGroup(ctx, m.Text, m.Color, m.Path, m.ParentID)
+	case ipc.MutGroupNest:
+		return nil, d.nestGroup(ctx, m.GroupID, m.ParentID)
 	case ipc.MutGroupPath:
 		return nil, d.setGroupPath(ctx, m.GroupID, m.Path)
 	case ipc.MutGroupRename:
@@ -135,25 +137,7 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutGroupArchive:
 		return nil, d.archiveGroup(ctx, m.GroupID)
 	case ipc.MutGroupUnarchive:
-		if err := st.SetGroupArchived(ctx, m.GroupID, false); err != nil {
-			return nil, err
-		}
-		if !m.Flag {
-			return nil, nil
-		}
-		sessions, err := st.Sessions(ctx, true)
-		if err != nil {
-			return nil, err
-		}
-		for _, s := range sessions {
-			if s.GroupID == m.GroupID && s.Status == core.StatusArchived && !s.IsTerminal() {
-				core.Apply(s, core.Event{Kind: core.EventUnarchived, Time: d.eventTime(s)})
-				if err := st.UpdateSession(ctx, s); err != nil {
-					return nil, err
-				}
-			}
-		}
-		return nil, nil
+		return nil, d.unarchiveGroup(ctx, m.GroupID, m.Flag)
 	case ipc.MutGroupCollapse:
 		if m.GroupID != "" {
 			return nil, st.SetGroupCollapsed(ctx, m.GroupID, m.Flag)
@@ -295,21 +279,154 @@ func (d *Daemon) unarchive(ctx context.Context, id string) error {
 		if s.GroupID == "" {
 			return nil // in no group
 		}
-		g, err := st.Group(ctx, s.GroupID)
-		if err != nil || g.ArchivedAt.IsZero() {
+		return bringBack(ctx, st, s.GroupID)
+	})
+}
+
+// bringBack unarchives group id if it's archived, and its parent if that is:
+// what's unarchived inside them never lands where no one sees it.
+func bringBack(ctx context.Context, st *store.Store, id string) error {
+	for id != "" {
+		g, err := st.Group(ctx, id)
+		if err != nil {
 			return err
 		}
-		err = st.SetGroupArchived(ctx, g.ID, false)
-		if errors.Is(err, store.ErrDuplicateName) {
-			return invalid("its group %q can't come back: another group has that name. Rename that one first", g.Name)
+		if !g.ArchivedAt.IsZero() {
+			err = st.SetGroupArchived(ctx, g.ID, false)
+			if errors.Is(err, store.ErrDuplicateName) {
+				return invalid("the group %q can't come back: another group has that name. Rename that one first", g.Name)
+			}
+			if err != nil {
+				return err
+			}
 		}
-		return err
+		id = g.ParentID
+	}
+	return nil
+}
+
+// family is group id and the groups inside it.
+func family(ctx context.Context, st *store.Store, id string) ([]string, error) {
+	groups, err := st.Groups(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{id}
+	for _, g := range groups {
+		if g.ParentID == id {
+			ids = append(ids, g.ID)
+		}
+	}
+	return ids, nil
+}
+
+// unarchiveGroup brings back a group and the groups inside it, and its
+// parent if that's archived; with sessions, the sessions in all of them too,
+// as paused. All or nothing.
+func (d *Daemon) unarchiveGroup(ctx context.Context, id string, sessions bool) error {
+	return d.store.WithTx(ctx, func(st *store.Store) error {
+		ids, err := family(ctx, st, id)
+		if err != nil {
+			return err
+		}
+		if _, err := st.Group(ctx, id); err != nil {
+			return err
+		}
+		for _, gid := range ids {
+			if err := bringBack(ctx, st, gid); err != nil {
+				return err
+			}
+		}
+		if !sessions {
+			return nil
+		}
+		all, err := st.Sessions(ctx, true)
+		if err != nil {
+			return err
+		}
+		for _, s := range all {
+			if slices.Contains(ids, s.GroupID) && s.Status == core.StatusArchived && !s.IsTerminal() {
+				core.Apply(s, core.Event{Kind: core.EventUnarchived, Time: d.eventTime(s)})
+				if err := st.UpdateSession(ctx, s); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
+}
+
+// nestGroup puts a group inside parent, after its other children, or
+// ("") at the top, after the other top-level groups. Groups nest two levels:
+// the parent must be at the top, and a group with children stays there.
+func (d *Daemon) nestGroup(ctx context.Context, id, parent string) error {
+	return d.store.WithTx(ctx, func(st *store.Store) error {
+		g, err := st.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		if parent != "" {
+			if err := checkParent(ctx, st, parent); err != nil {
+				return err
+			}
+			if parent == id {
+				return invalid("a group can't go inside itself")
+			}
+			ids, err := family(ctx, st, id)
+			if err != nil {
+				return err
+			}
+			if len(ids) > 1 {
+				return invalid("%q has groups inside it, so it can't go inside another: groups nest two levels", g.Name)
+			}
+		}
+		if g.ParentID == parent {
+			return nil
+		}
+		return st.SetGroupParent(ctx, id, parent, lastKey(ctx, st, parent)+10)
+	})
+}
+
+// checkParent says whether group id can hold groups: it's there, live, and
+// at the top.
+func checkParent(ctx context.Context, st *store.Store, id string) error {
+	p, err := st.Group(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !p.ArchivedAt.IsZero() {
+		return invalid("%q is archived", p.Name)
+	}
+	if p.ParentID != "" {
+		return invalid("%q is inside another group, so it can't hold groups: groups nest two levels", p.Name)
+	}
+	return nil
+}
+
+// lastKey is the largest sort key among parent's children ("" the top).
+func lastKey(ctx context.Context, st *store.Store, parent string) int {
+	groups, _ := st.Groups(ctx, true)
+	last := 0
+	for _, g := range groups {
+		if g.ParentID == parent && g.SortKey > last {
+			last = g.SortKey
+		}
+	}
+	return last
 }
 
 // createGroup makes a group, or with a path a folder: the path is made if
 // it's missing, before anything is saved.
-func (d *Daemon) createGroup(ctx context.Context, name, color, path string) (*core.Group, error) {
+// Inside a parent, it starts in the parent's color unless one is given.
+func (d *Daemon) createGroup(ctx context.Context, name, color, path, parent string) (*core.Group, error) {
+	if parent != "" {
+		if err := checkParent(ctx, d.store, parent); err != nil {
+			return nil, err
+		}
+		if p, err := d.store.Group(ctx, parent); err == nil && color == "" {
+			color = p.Color
+		}
+	}
 	if path != "" {
 		var err error
 		if path, err = makeFolder(path); err != nil {
@@ -319,8 +436,17 @@ func (d *Daemon) createGroup(ctx context.Context, name, color, path string) (*co
 	var g *core.Group
 	err := d.store.WithTx(ctx, func(st *store.Store) error {
 		var err error
-		if g, err = st.CreateGroup(ctx, name, color); err != nil || path == "" {
+		if g, err = st.CreateGroup(ctx, name, color); err != nil {
 			return err
+		}
+		if parent != "" {
+			g.ParentID, g.SortKey = parent, lastKey(ctx, st, parent)+10
+			if err := st.SetGroupParent(ctx, g.ID, parent, g.SortKey); err != nil {
+				return err
+			}
+		}
+		if path == "" {
+			return nil
 		}
 		g.Path = path
 		return st.SetGroupPath(ctx, g.ID, path)
@@ -380,32 +506,52 @@ func makeFolder(path string) (string, error) {
 	return path, nil
 }
 
-// archiveGroup archives a group and its sessions, all or nothing.
+// archiveGroup archives a group, the groups inside it and all their
+// sessions, all or nothing.
 func (d *Daemon) archiveGroup(ctx context.Context, id string) error {
-	return d.withGroupArchived(ctx, id, func(st *store.Store) error { return st.SetGroupArchived(ctx, id, true) })
+	return d.withGroupArchived(ctx, id, func(st *store.Store, ids []string) error {
+		for _, gid := range ids {
+			if err := st.SetGroupArchived(ctx, gid, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// deleteGroup deletes a group and archives its sessions, all or nothing: to
-// keep a session, move it out first.
+// deleteGroup deletes a group and the groups inside it, and archives all
+// their sessions, all or nothing: to keep one, move it out first.
 func (d *Daemon) deleteGroup(ctx context.Context, id string) error {
-	return d.withGroupArchived(ctx, id, func(st *store.Store) error { return st.DeleteGroup(ctx, id) })
+	return d.withGroupArchived(ctx, id, func(st *store.Store, ids []string) error {
+		for i := len(ids) - 1; i >= 0; i-- { // the children, then the group
+			if err := st.DeleteGroup(ctx, ids[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
-// withGroupArchived archives the live sessions in group id, then does then,
-// in one transaction. It checks the group before it changes anything, and
-// stops the sessions' processes only once it's saved.
-func (d *Daemon) withGroupArchived(ctx context.Context, id string, then func(*store.Store) error) error {
+// withGroupArchived archives the live sessions in group id and the groups
+// inside it, then does then with the groups' ids (the group first), in one
+// transaction. It checks the group before it changes anything, and stops
+// the sessions' processes only once it's saved.
+func (d *Daemon) withGroupArchived(ctx context.Context, id string, then func(*store.Store, []string) error) error {
 	if _, err := d.store.Group(ctx, id); err != nil {
 		return err
 	}
 	var archived []*core.Session
 	err := d.store.WithTx(ctx, func(st *store.Store) error {
+		ids, err := family(ctx, st, id)
+		if err != nil {
+			return err
+		}
 		sessions, err := st.Sessions(ctx, false)
 		if err != nil {
 			return err
 		}
 		for _, s := range sessions {
-			if s.GroupID != id || s.Status == core.StatusArchived {
+			if !slices.Contains(ids, s.GroupID) || s.Status == core.StatusArchived {
 				continue
 			}
 			if err := d.recordArchived(ctx, st, s); err != nil {
@@ -413,7 +559,7 @@ func (d *Daemon) withGroupArchived(ctx context.Context, id string, then func(*st
 			}
 			archived = append(archived, s)
 		}
-		return then(st)
+		return then(st, ids)
 	})
 	if err != nil {
 		return err
@@ -434,7 +580,14 @@ func (d *Daemon) moveGroup(ctx context.Context, id, after, before string) error 
 	if err != nil {
 		return err
 	}
-	order := slices.Clone(groups)
+	// Groups move among their siblings: the same parent, or the top.
+	parent := ""
+	for _, g := range groups {
+		if g.ID == id {
+			parent = g.ParentID
+		}
+	}
+	order := slices.DeleteFunc(slices.Clone(groups), func(g *core.Group) bool { return g.ParentID != parent })
 	sort.SliceStable(order, func(i, j int) bool { return order[i].SortKey < order[j].SortKey })
 	at := -1
 	for i, g := range order {

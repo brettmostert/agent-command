@@ -292,6 +292,20 @@
       }
     },
     {
+      "name": "group.nest",
+      "description": "Puts a group inside another, two levels deep, or (with no parent) at the top.",
+      "scope": "act",
+      "kind": "change",
+      "grant": "entities",
+      "transport": {
+        "op": "mutate",
+        "kind": "group.nest"
+      },
+      "input": {
+        "$ref": "#/$defs/ipc.Mutation"
+      }
+    },
+    {
       "name": "group.path",
       "description": "Makes a group a folder with a path, made if it's missing, or (with no path) a group again.",
       "scope": "act",
@@ -2559,6 +2573,9 @@
         "path": {
           "type": "string"
         },
+        "parent": {
+          "type": "string"
+        },
         "created_at": {
           "type": "string",
           "format": "date-time"
@@ -3189,6 +3206,9 @@
           "type": "string"
         },
         "path": {
+          "type": "string"
+        },
+        "parent_id": {
           "type": "string"
         },
         "flag": {

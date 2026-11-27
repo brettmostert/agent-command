@@ -166,6 +166,7 @@ struct SidebarView: View {
         let headerID = SidebarLayout.headerID(group.key)
         return GroupHeaderRow(header: header, isSelected: store.selectedGroupKey == group.key,
                               isCursor: store.sidebarFocused && store.cursorID == headerID,
+                              isMarked: store.markedIDs.contains(headerID),
                               isFocused: store.options.focused == group.key,
                               toggle: { store.toggleCollapsed(group.key) })
             .id(headerID)
@@ -194,6 +195,17 @@ struct SidebarView: View {
                 }
                 Button("Move Up") { store.moveGroup(group.key, by: -1) }
                 Button("Move Down") { store.moveGroup(group.key, by: 1) }
+                let parents = SidebarLayout.parents(for: group, in: store.groups)
+                if !parents.isEmpty {
+                    Menu("Move Into") {
+                        ForEach(parents) { parent in
+                            Button { store.nestGroup(group.key, into: parent.key) } label: { Label(parent.title, systemImage: parent.symbol) }
+                        }
+                    }
+                }
+                if !group.parent.isEmpty {
+                    Button("Move to Top Level") { store.nestGroup(group.key, into: nil) }
+                }
                 Divider()
                 Button("Archive Group…") { archiveGroup(group) }
                 Button("Delete Group…") { deleteGroup(group) }
@@ -385,6 +397,7 @@ struct GroupHeaderRow: View {
     let header: GroupHeader
     var isSelected = false
     var isCursor = false
+    var isMarked = false
     /// It's the group you focused.
     var isFocused = false
     /// Collapses or expands it: what its arrow does.
@@ -415,6 +428,9 @@ struct GroupHeaderRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            if isMarked {
+                Text("x").fontWeight(.bold).foregroundStyle(isSelected ? theme.bg : theme.red)
+            }
             Text(header.collapsed ? "▸" : "▾").foregroundStyle(isSelected ? theme.bg : theme.dim)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: toggle)
@@ -433,7 +449,8 @@ struct GroupHeaderRow: View {
             }
             Text("\(header.count)").foregroundStyle(theme.dim)
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 12 + CGFloat(header.depth) * 16) // a group inside another, a level in
+        .padding(.trailing, 12)
         .padding(.top, 10)
         .padding(.bottom, 2)
         .background(isSelected ? theme.yellow : Color.clear)

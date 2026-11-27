@@ -94,7 +94,7 @@ final class ScheduledModel {
     }
 
     /// The groups and folders a job can be in: this Mac's, as it runs here.
-    var groupChoices: [SessionGroup] { SidebarLayout.orderedGroups(store.groups).filter { $0.host.isEmpty } }
+    var groupChoices: [SessionGroup] { SidebarLayout.nestedGroups(store.groups).map(\.group).filter { $0.host.isEmpty } }
 
     /// Puts the job in a group, a folder or ("") no group. A folder fills in
     /// the job's path, which can still be changed; a group leaves it as it is.
