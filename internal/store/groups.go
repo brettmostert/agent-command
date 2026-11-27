@@ -19,7 +19,7 @@ var (
 // Palette is the round-robin color order for new groups.
 var Palette = []string{"blue", "magenta", "cyan", "yellow", "green", "red"}
 
-const groupCols = `id, name, color, sort_key, collapsed, created_at, archived_at`
+const groupCols = `id, name, color, sort_key, collapsed, created_at, archived_at, path`
 
 // CreateGroup adds a group. An empty color is assigned from Palette; new
 // groups sort after existing ones.
@@ -38,8 +38,8 @@ func (s *Store) CreateGroup(ctx context.Context, name, color string) (*core.Grou
 			g.Color = Palette[count%len(Palette)]
 		}
 		g.SortKey = maxKey + 10
-		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?)`,
-			g.ID, g.Name, g.Color, g.SortKey, 0, ms(g.CreatedAt), 0)
+		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?,?)`,
+			g.ID, g.Name, g.Color, g.SortKey, 0, ms(g.CreatedAt), 0, "")
 		return mapUnique(err)
 	})
 	if err != nil {
@@ -93,6 +93,12 @@ func (s *Store) RenameGroup(ctx context.Context, id, name string) error {
 // SetGroupColor changes a group's color.
 func (s *Store) SetGroupColor(ctx context.Context, id, color string) error {
 	return s.exec1(ctx, `UPDATE groups SET color = ? WHERE id = ?`, color, id)
+}
+
+// SetGroupPath makes a group a folder with path, or ("") a group again.
+// Making sure the path exists is the caller's job: it's on the group's host.
+func (s *Store) SetGroupPath(ctx context.Context, id, path string) error {
+	return s.updateGroup(ctx, id, `UPDATE groups SET path = ? WHERE id = ?`, path, id)
 }
 
 // SetGroupCollapsed records a group's collapsed state.
@@ -188,7 +194,7 @@ func scanGroup(row scanner) (*core.Group, error) {
 		collapsed           int
 		created, archivedAt int64
 	)
-	err := row.Scan(&g.ID, &g.Name, &g.Color, &g.SortKey, &collapsed, &created, &archivedAt)
+	err := row.Scan(&g.ID, &g.Name, &g.Color, &g.SortKey, &collapsed, &created, &archivedAt, &g.Path)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

@@ -73,7 +73,10 @@ type Group struct {
 	// Color is one of the color names (blue, magenta, cyan, yellow, green, red).
 	Color string `json:"color,omitempty"`
 	// Order is where you put it among the groups.
-	Order      int       `json:"order,omitempty"`
+	Order int `json:"order,omitempty"`
+	// Path makes it a folder: new sessions and schedules in it start there.
+	// None: it's a group, which has no path.
+	Path       string    `json:"path,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
 	ArchivedAt time.Time `json:"archived_at,omitzero"`
 	// Host is the Remote host a group is on, for a host's tree; "" for this
@@ -146,7 +149,7 @@ func SessionsOf(ss []*core.Session) []*Session {
 
 // GroupOf is g on the wire.
 func GroupOf(g *core.Group) *Group {
-	return &Group{ID: g.ID, Type: "group", Host: g.Host, Name: g.Name, Color: g.Color, Order: g.SortKey,
+	return &Group{ID: g.ID, Type: "group", Host: g.Host, Name: g.Name, Color: g.Color, Order: g.SortKey, Path: g.Path,
 		CreatedAt: g.CreatedAt, ArchivedAt: g.ArchivedAt}
 }
 
@@ -161,7 +164,7 @@ func GroupsOf(gs []*core.Group) []*Group {
 
 // Core is the group as internal/core has it; collapsed comes from the view.
 func (g *Group) Core(collapsed bool) *core.Group {
-	return &core.Group{ID: g.ID, Host: g.Host, Name: g.Name, Color: g.Color, SortKey: g.Order,
+	return &core.Group{ID: g.ID, Host: g.Host, Name: g.Name, Color: g.Color, SortKey: g.Order, Path: g.Path,
 		CreatedAt: g.CreatedAt, ArchivedAt: g.ArchivedAt, Collapsed: collapsed}
 }
 

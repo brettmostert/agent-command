@@ -305,8 +305,9 @@ struct NewSessionPickerTests {
         #expect(!NewSessionPicker(hosts: [], client: client(fake)).handle(NewSessionPicker.groupKey!), "no groups: no list")
 
         #expect(p.handle(NewSessionPicker.groupKey!) && p.choosingGroup)
-        #expect(p.groupRows == [.group(api), .group(web), .none, .new("")])
-        #expect(p.groupRows.map(\.title) == ["api", "web", "No group", "New group…"])
+        #expect(p.groupRows == [.group(api), .group(web), .none, .new(""), .newFolder("")])
+        #expect(p.groupRows.map(\.title) == ["api", "web", "No group", "New group…", "New folder…"])
+        #expect(p.groupRows.map(\.symbol) == ["circle.fill", "circle.fill", nil, "circle.fill", "folder"])
         #expect(p.groupCursor == 1, "the cursor starts on the group it's in")
         #expect(!p.handle(KeyCombo("tab")!), "tab doesn't change where while choosing a group")
         p.moveGroupCursor(-5)
@@ -316,11 +317,12 @@ struct NewSessionPickerTests {
         p.moveGroupCursor(10)
         #expect(!p.pickGroupAtCursor() && p.choosingGroup, "a new group needs a name")
         p.groupSearch = "AP"
-        #expect(p.groupRows == [.group(api), .new("AP")] && p.groupCursor == 0)
+        #expect(p.groupRows == [.group(api), .new("AP"), .newFolder("AP")] && p.groupCursor == 0)
         p.groupSearch = "api"
         #expect(p.groupRows == [.group(api)], "no new group with a name that's there")
         p.groupSearch = "infra "
-        #expect(p.groupRows == [.new("infra")] && p.groupRows[0].title == "New group “infra”")
+        #expect(p.groupRows == [.new("infra"), .newFolder("infra")] && p.groupRows[0].title == "New group “infra”")
+        #expect(p.groupRows[1].title == "New folder “infra”")
         #expect(p.pickGroupAtCursor() && p.group == .new("infra") && p.groupTitle == "infra (new)" && p.groupColor == nil)
         p.toggleGroups()
         #expect(p.groupCursor == 0, "a new group isn't in the list yet")
@@ -330,6 +332,16 @@ struct NewSessionPickerTests {
         #expect(p.groupCursor == 2, "the cursor starts on No group when that's chosen")
         p.toggleGroups()
         #expect(!p.choosingGroup)
+
+        // A new folder, made at the folder chosen for the session.
+        p.toggleGroups()
+        p.groupSearch = "docs"
+        p.moveGroupCursor(1)
+        #expect(p.pickGroupAtCursor() && p.group == .newFolder("docs") && p.groupTitle == "docs (new folder)" && p.groupSymbol == "folder")
+        let folder = SessionGroup(id: "f", name: "api", color: "blue", path: "/w/api")
+        let inFolder = NewSessionPicker(hosts: [], client: client(fake), groups: [folder], group: folder)
+        #expect(inFolder.groupSymbol == "folder" && inFolder.groupColor == "blue")
+        #expect(NewSessionPicker(hosts: [], client: client(fake), groups: [folder]).groupSymbol == nil, "no group has no icon")
     }
 
     @Test func tabAndTheArrowsChangeWhere() {

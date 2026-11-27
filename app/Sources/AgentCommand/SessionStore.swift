@@ -652,13 +652,15 @@ final class SessionStore {
         var after: String?
         var before: String?
         var flag: Bool?
+        var path: String?
 
         init(kind: String, on host: String = "", group_id: String? = nil, text: String? = nil, color: String? = nil,
-             targets: [Target]? = nil, after: String? = nil, before: String? = nil, flag: Bool? = nil) {
+             targets: [Target]? = nil, after: String? = nil, before: String? = nil, flag: Bool? = nil, path: String? = nil) {
             self.kind = kind
             self.host = host.isEmpty ? nil : host
             (self.group_id, self.text, self.color, self.targets, self.after, self.before) = (group_id, text, color, targets, after, before)
             self.flag = flag
+            self.path = path
         }
     }
 
@@ -671,11 +673,13 @@ final class SessionStore {
     /// Makes a group, and moves sessions into it (with their sets). It's made
     /// on the sessions' host, which keeps its own groups; with none, on host.
     /// made gets the group once it's made.
-    func createGroup(_ name: String, moving ids: [String] = [], on host: String = "", made: @escaping (SessionGroup) -> Void = { _ in }) {
+    /// With a path, it's a folder there, made if it's missing.
+    func createGroup(_ name: String, path: String? = nil, moving ids: [String] = [], on host: String = "",
+                     made: @escaping (SessionGroup) -> Void = { _ in }) {
         let moving = targets(ids)
         let host = moving.first?.host ?? host
-        run(failure: "Couldn't make the group") { conn in
-            let group: SessionGroup = try conn.call("mutate", GroupMutation(kind: "group.create", on: host, text: name))
+        run(failure: path == nil ? "Couldn't make the group" : "Couldn't make the folder") { conn in
+            let group: SessionGroup = try conn.call("mutate", GroupMutation(kind: "group.create", on: host, text: name, path: path))
             if !moving.isEmpty {
                 try conn.send("mutate", GroupMutation(kind: "session.move", on: host, group_id: group.id, targets: moving))
             }
@@ -704,6 +708,13 @@ final class SessionStore {
     func renameGroup(_ key: String, to name: String) {
         guard let group = group(key: key) else { return }
         mutateGroup(GroupMutation(kind: "group.rename", on: group.host, group_id: group.id, text: name), failure: "Couldn't rename the group")
+    }
+
+    /// Makes a group a folder at path (made if it's missing), or with nil a group again.
+    func setGroupPath(_ key: String, _ path: String?) {
+        guard let group = group(key: key) else { return }
+        mutateGroup(GroupMutation(kind: "group.path", on: group.host, group_id: group.id, path: path ?? ""),
+                    failure: path == nil ? "Couldn't make it a group" : "Couldn't set the folder's path")
     }
 
     func setGroupColor(_ key: String, _ color: String) {

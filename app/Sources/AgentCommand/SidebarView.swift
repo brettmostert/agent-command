@@ -23,6 +23,10 @@ struct SidebarView: View {
     var newGroup: ([Session]) -> Void = { _ in }
     /// Asks for a group's new name.
     var renameGroup: (SessionGroup) -> Void = { _ in }
+    /// Asks for a folder's path and name, then makes it with these sessions in it.
+    var newFolder: ([Session]) -> Void = { _ in }
+    /// Asks for a path, and makes a group a folder there, or changes a folder's.
+    var chooseGroupPath: (SessionGroup) -> Void = { _ in }
     /// A click on a header: the sidebar takes the keyboard, with the group selected.
     var clickGroup: (SessionGroup) -> Void = { _ in }
     /// Asks, then archives a group and its sessions.
@@ -50,6 +54,7 @@ struct SidebarView: View {
             Toggle("Descending", isOn: $store.options.descending)
             Divider()
             Button("New Group…") { newGroup([]) }
+            Button("New Folder…") { newFolder([]) }
         } label: {
             Text(store.options.mode == .groups ? "groups ▾" : "list ▾").font(AppFont.ui(11)).foregroundStyle(theme.dim)
         }
@@ -176,6 +181,12 @@ struct SidebarView: View {
                     Button("Focus") { store.focusGroup(group.key) }
                 }
                 Button("Rename…") { renameGroup(group) }
+                if group.isFolder {
+                    Button("Change Path…") { chooseGroupPath(group) }
+                    Button("Make Group") { store.setGroupPath(group.key, nil) }
+                } else {
+                    Button("Make Folder…") { chooseGroupPath(group) }
+                }
                 Menu("Colour") {
                     ForEach(SessionGroup.colors, id: \.self) { color in
                         Button(color.capitalized) { store.setGroupColor(group.key, color) }
@@ -210,11 +221,16 @@ struct SidebarView: View {
         Menu("Move to Group") {
             ForEach(SidebarLayout.groups(for: session, in: store.groups)) { group in
                 if group.key != session.groupKey {
-                    Button(group.title) { store.moveSessions(store.actionTargets(forRow: session).map(\.id), to: group.key) }
+                    Button {
+                        store.moveSessions(store.actionTargets(forRow: session).map(\.id), to: group.key)
+                    } label: {
+                        Label(group.title, systemImage: group.symbol)
+                    }
                 }
             }
             Divider()
             Button("New Group…") { newGroup(store.actionTargets(forRow: session)) }
+            Button("New Folder…") { newFolder(store.actionTargets(forRow: session)) }
             if session.groupKey != nil {
                 Button("No Group") { store.moveToNoGroup(store.actionTargets(forRow: session).map(\.id)) }
             }
@@ -331,6 +347,7 @@ struct SidebarView: View {
         let group = section.group
         return HStack(spacing: 6) {
             if let group {
+                GroupHeaderRow.icon(group, color: GroupHeaderRow.color(group.color, theme: theme))
                 Text(group.title).fontWeight(.bold).foregroundStyle(GroupHeaderRow.color(group.color, theme: theme)).lineLimit(1)
             } else {
                 Text(section.title).foregroundStyle(theme.dim).lineLimit(1)
@@ -375,6 +392,15 @@ struct GroupHeaderRow: View {
 
     private var theme: AppTheme { .shared }
 
+    /// Its kind's icon: a folder, or a dot for a group, in color.
+    static func icon(_ group: SessionGroup, color: Color) -> some View {
+        Image(systemName: group.symbol)
+            .font(.system(size: group.isFolder ? 11 : 7))
+            .foregroundStyle(color)
+            .frame(width: 12)
+            .help(group.isFolder ? "Folder: \(group.path)" : "Group")
+    }
+
     static func color(_ name: String, theme: AppTheme) -> Color {
         switch name {
         case "blue": theme.blue
@@ -393,6 +419,7 @@ struct GroupHeaderRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture(perform: toggle)
                 .help(header.collapsed ? "Expand" : "Collapse")
+            Self.icon(header.group, color: isSelected ? theme.bg : Self.color(header.group.color, theme: theme))
             Text(header.group.title).fontWeight(.bold)
                 .foregroundStyle(isSelected ? theme.bg : Self.color(header.group.color, theme: theme)).lineLimit(1)
             if isFocused {

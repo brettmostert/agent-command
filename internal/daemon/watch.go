@@ -69,6 +69,9 @@ func (d *Daemon) newSession(ctx context.Context, req ipc.NewRequest) (*core.Sess
 		s   *core.Session
 		err error
 	)
+	if req.Cwd == "" && req.Resume == "" {
+		req.Cwd = d.folderPath(ctx, req.GroupID) // a folder's: it starts there
+	}
 	switch {
 	case req.Resume != "":
 		s, err = d.resumeConversation(ctx, req)

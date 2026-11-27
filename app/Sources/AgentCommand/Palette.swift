@@ -29,6 +29,12 @@ nonisolated enum PaletteAction: Equatable {
     case archiveGroup(String)
     /// Takes sessions out of their group.
     case moveToNoGroup([Session])
+    /// Asks for a folder's path, then its name, and makes it with these sessions in it.
+    case newFolder([Session])
+    /// Asks for a path, and makes a group a folder there, or changes a folder's, by key.
+    case chooseGroupPath(String)
+    /// Makes a folder a group again, by key.
+    case clearGroupPath(String)
     case closePane
     case focus(FocusDirection)
     case equalizePanes
@@ -128,6 +134,7 @@ enum Palette {
                                      action: .moveToGroup(sessions, group: group.key)))
         }
         list.append(PaletteEntry(section: section, title: "Move to a new group…", action: .newGroup(sessions)))
+        list.append(PaletteEntry(section: section, title: "Move to a new folder…", action: .newFolder(sessions)))
         let live = Set(SidebarLayout.orderedGroups(groups).map(\.key))
         if sessions.contains(where: { $0.groupKey.map(live.contains) ?? false }) {
             list.append(PaletteEntry(section: section, title: "Move to No Group", action: .moveToNoGroup(sessions)))
@@ -188,6 +195,7 @@ enum Palette {
         list.append(PaletteEntry(section: "New", title: "New session…", shortcut: keys.label(.newSession), action: .chooseHarness))
         list.append(PaletteEntry(section: "New", title: "Resume a session…", shortcut: keys.label(.resume), action: .resume))
         list.append(PaletteEntry(section: "New", title: "Group…", action: .newGroup([])))
+        list.append(PaletteEntry(section: "New", title: "Folder…", action: .newFolder([])))
         for host in state.hosts {
             list.append(PaletteEntry(section: "New", title: "Session on \(host)…", key: host, action: .newOnHost(host)))
         }
@@ -264,6 +272,12 @@ enum Palette {
         guard let group = state.group else { return list }
         if group.key != state.focusedGroup?.key {
             list.append(PaletteEntry(section: "Groups", title: "Focus \(group.title)", key: group.key, action: .focusGroup(group.key)))
+        }
+        if group.isFolder {
+            list.append(PaletteEntry(section: "Groups", title: "Change the path of \(group.title)…", key: group.key, action: .chooseGroupPath(group.key)))
+            list.append(PaletteEntry(section: "Groups", title: "Make \(group.title) a group", key: group.key, action: .clearGroupPath(group.key)))
+        } else {
+            list.append(PaletteEntry(section: "Groups", title: "Make \(group.title) a folder…", key: group.key, action: .chooseGroupPath(group.key)))
         }
         list.append(PaletteEntry(section: "Groups", title: "Archive group \(group.title)…", key: group.key, action: .archiveGroup(group.key)))
         return list

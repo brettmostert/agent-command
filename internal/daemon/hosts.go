@@ -59,6 +59,12 @@ func (d *Daemon) hostSession(ctx context.Context, req ipc.NewRequest) (*core.Ses
 		kind, harnessID = h.Kind, h.ID
 	}
 	remote := d.newSessionsRemote(req.Remote)
+	// A folder's path is made again if it's gone.
+	if path := d.folderPath(ctx, req.GroupID); path != "" {
+		if _, err := makeFolder(path); err != nil {
+			return nil, err
+		}
+	}
 	d.mu.Lock()
 	s := &core.Session{Kind: core.KindHosted, Cwd: req.Cwd, HarnessKind: kind, HarnessID: harnessID, CreatedAt: d.cfg.Now().UTC(), NameSource: core.NameAuto,
 		Remote: remote, JobID: req.JobID}

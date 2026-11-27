@@ -426,10 +426,6 @@ func newMoveCmd() *cobra.Command {
 	return cmd
 }
 
-func createGroup(c *client, name, color string) (*core.Group, error) {
-	return createGroupOn(c, name, color, "")
-}
-
 // createGroupOn makes a group on host ("" for this machine).
 func createGroupOn(c *client, name, color, host string) (*core.Group, error) {
 	var g ipc.Group

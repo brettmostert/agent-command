@@ -748,9 +748,9 @@ func TestNoDefaultGroupMigration(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "state.db")
 	old, err := Open(ctx, p)
 	must(t, err)
-	g, err := old.CreateGroup(ctx, "work", "")
-	must(t, err)
+	g := &core.Group{ID: "gwork"} // made as that schema made groups
 	for _, q := range []string{
+		`INSERT INTO groups (id, name, color, sort_key, is_default, created_at) VALUES ('gwork', 'work', 'blue', 10, 0, 1)`,
 		`INSERT INTO sessions (id, name, group_id, created_at, kind, set_id, set_order) VALUES ('a', 'a', 'default', 1, 'hosted', 'S', 1)`,
 		`INSERT INTO sessions (id, name, group_id, created_at, kind, set_id, set_order) VALUES ('b', 'b', 'default', 2, 'hosted', 'S', 2)`,
 		`INSERT INTO sessions (id, name, group_id, created_at, kind) VALUES ('w', 'w', '` + g.ID + `', 3, 'hosted')`,

@@ -90,7 +90,21 @@ final class ScheduledModel {
     }
 
     func groupName(_ id: String) -> String {
-        store.groups.first { $0.id == id }?.name ?? "Default"
+        store.groups.first { $0.id == id && $0.host.isEmpty }?.name ?? "No group"
+    }
+
+    /// The groups and folders a job can be in: this Mac's, as it runs here.
+    var groupChoices: [SessionGroup] { SidebarLayout.orderedGroups(store.groups).filter { $0.host.isEmpty } }
+
+    /// Puts the job in a group, a folder or ("") no group. A folder fills in
+    /// the job's path, which can still be changed; a group leaves it as it is.
+    func setGroup(_ id: String) {
+        guard var draft else { return }
+        draft.groupID = id
+        if let folder = groupChoices.first(where: { $0.id == id }), folder.isFolder, draft.place != .session {
+            draft.cwd = folder.path
+        }
+        self.draft = draft
     }
 
     // MARK: Lifecycle

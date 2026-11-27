@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -121,7 +123,9 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutMove:
 		return nil, st.MoveSessions(ctx, m.GroupID, m.LocalIDs...)
 	case ipc.MutGroupCreate:
-		return st.CreateGroup(ctx, m.Text, m.Color)
+		return d.createGroup(ctx, m.Text, m.Color, m.Path)
+	case ipc.MutGroupPath:
+		return nil, d.setGroupPath(ctx, m.GroupID, m.Path)
 	case ipc.MutGroupRename:
 		return nil, st.RenameGroup(ctx, m.GroupID, m.Text)
 	case ipc.MutGroupColor:
@@ -301,6 +305,79 @@ func (d *Daemon) unarchive(ctx context.Context, id string) error {
 		}
 		return err
 	})
+}
+
+// createGroup makes a group, or with a path a folder: the path is made if
+// it's missing, before anything is saved.
+func (d *Daemon) createGroup(ctx context.Context, name, color, path string) (*core.Group, error) {
+	if path != "" {
+		var err error
+		if path, err = makeFolder(path); err != nil {
+			return nil, err
+		}
+	}
+	var g *core.Group
+	err := d.store.WithTx(ctx, func(st *store.Store) error {
+		var err error
+		if g, err = st.CreateGroup(ctx, name, color); err != nil || path == "" {
+			return err
+		}
+		g.Path = path
+		return st.SetGroupPath(ctx, g.ID, path)
+	})
+	return g, err
+}
+
+// setGroupPath makes a group a folder with path, made if it's missing, or
+// ("") a group again. Its sessions don't move.
+func (d *Daemon) setGroupPath(ctx context.Context, id, path string) error {
+	if _, err := d.store.Group(ctx, id); err != nil {
+		return err
+	}
+	if path != "" {
+		var err error
+		if path, err = makeFolder(path); err != nil {
+			return err
+		}
+	}
+	return d.store.SetGroupPath(ctx, id, path)
+}
+
+// folderPath is the path of the folder with id; "" for a group, no group or
+// one that's gone.
+func (d *Daemon) folderPath(ctx context.Context, id string) string {
+	if id == "" {
+		return ""
+	}
+	g, err := d.store.Group(ctx, id)
+	if err != nil {
+		return ""
+	}
+	return g.Path
+}
+
+// makeFolder makes a folder's path, and its parents, if they're missing,
+// and returns it clean. It must be absolute, or start with ~/, and not be a
+// file.
+func makeFolder(path string) (string, error) {
+	if rest, ok := strings.CutPrefix(path, "~/"); ok || path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, rest)
+	}
+	if !filepath.IsAbs(path) {
+		return "", invalid("a folder's path must be absolute, not %q", path)
+	}
+	path = filepath.Clean(path)
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return "", invalid("%s is a file, not a folder", path)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil { // #nosec G301 -- a folder for the user's own work
+		return "", invalid("couldn't make %s: %v", path, err)
+	}
+	return path, nil
 }
 
 // archiveGroup archives a group and its sessions, all or nothing.

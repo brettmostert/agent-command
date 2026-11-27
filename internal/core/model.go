@@ -182,20 +182,34 @@ type Set struct {
 	CreatedAt time.Time
 }
 
-// Group is a session group.
+// Group is a session group, or (with a Path) a folder.
 type Group struct {
 	ID string
 	// Host is the Remote host the group is on, for a host's tree; "" for this
 	// machine's. Ids are unique only within their host.
-	Host    string
-	Name    string
-	Color   string
+	Host  string
+	Name  string
+	Color string
+	// Path makes it a folder: new sessions and schedules in it start there.
+	// "" is a group, which has no path.
+	Path    string
 	SortKey int
 	// Collapsed is the CLI's view of the group; clients get it in
 	// ViewState.Collapsed, not with the group.
 	Collapsed  bool `json:"-"`
 	CreatedAt  time.Time
 	ArchivedAt time.Time
+}
+
+// IsFolder says whether g is a folder: a group with a path.
+func (g *Group) IsFolder() bool { return g.Path != "" }
+
+// KindMark is how text clients show g's kind: ▤ for a folder, ● for a group.
+func (g *Group) KindMark() string {
+	if g.IsFolder() {
+		return "▤"
+	}
+	return "●"
 }
 
 // ViewState is the CLI's list presentation, kept by the daemon. Each other

@@ -136,6 +136,12 @@ struct HarnessPickerView: View {
     private var groupLine: some View {
         HStack(spacing: 4) {
             Text("Group").foregroundStyle(theme.dim)
+            if let symbol = picker.groupSymbol {
+                Image(systemName: symbol)
+                    .font(.system(size: symbol == "circle.fill" ? 7 : 11))
+                    .foregroundStyle(picker.groupColor.map { GroupHeaderRow.color($0, theme: theme) } ?? theme.fg)
+                    .padding(.leading, 6)
+            }
             Text(picker.groupTitle)
                 .fontWeight(.bold)
                 .foregroundStyle(picker.groupColor.map { GroupHeaderRow.color($0, theme: theme) } ?? theme.fg)
@@ -157,7 +163,13 @@ struct HarnessPickerView: View {
         let rows = picker.groupRows
         return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
             let isSelected = index == picker.groupCursor
-            HStack {
+            HStack(spacing: 6) {
+                if let symbol = row.symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: symbol == "circle.fill" ? 7 : 11))
+                        .foregroundStyle(isSelected ? theme.bg : rowColor(row))
+                        .frame(width: 14)
+                }
                 Text(row.title)
                     .fontWeight(isSelected ? .bold : .regular)
                     .foregroundStyle(isSelected ? theme.bg : rowColor(row))

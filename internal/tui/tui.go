@@ -321,7 +321,11 @@ func (m *Model) build() {
 				if r.Count == 0 {
 					continue
 				}
-				m.rows = append(m.rows, row{group: fmt.Sprintf("%s (%d)", r.Title(), r.Count), host: host})
+				title := r.Title()
+				if r.Group != nil { // ▤ a folder, ● a group; No group has neither
+					title = r.Group.KindMark() + " " + title
+				}
+				m.rows = append(m.rows, row{group: fmt.Sprintf("%s (%d)", title, r.Count), host: host})
 				continue
 			}
 			m.rows = append(m.rows, row{host: host, s: r.Session, waiting: waiting[[2]string{host, r.Session.ID}]})

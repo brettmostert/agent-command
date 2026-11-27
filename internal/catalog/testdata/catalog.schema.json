@@ -247,7 +247,7 @@
     },
     {
       "name": "group.create",
-      "description": "Creates a group, with a name and a color.",
+      "description": "Creates a group, with a name and a color; with a path, a folder (the path is made if it's missing).",
       "scope": "act",
       "kind": "change",
       "grant": "entities",
@@ -286,6 +286,20 @@
       "transport": {
         "op": "mutate",
         "kind": "group.move"
+      },
+      "input": {
+        "$ref": "#/$defs/ipc.Mutation"
+      }
+    },
+    {
+      "name": "group.path",
+      "description": "Makes a group a folder with a path, made if it's missing, or (with no path) a group again.",
+      "scope": "act",
+      "kind": "change",
+      "grant": "entities",
+      "transport": {
+        "op": "mutate",
+        "kind": "group.path"
       },
       "input": {
         "$ref": "#/$defs/ipc.Mutation"
@@ -2542,6 +2556,9 @@
         "order": {
           "type": "integer"
         },
+        "path": {
+          "type": "string"
+        },
         "created_at": {
           "type": "string",
           "format": "date-time"
@@ -3169,6 +3186,9 @@
           "type": "string"
         },
         "color": {
+          "type": "string"
+        },
+        "path": {
           "type": "string"
         },
         "flag": {

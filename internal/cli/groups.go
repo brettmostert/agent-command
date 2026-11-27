@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -14,7 +15,7 @@ import (
 
 func newGroupCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "group", Short: "Manage session groups"}
-	cmd.AddCommand(newGroupListCmd(), newGroupCreateCmd(), newGroupRenameCmd(), newGroupColorCmd(),
+	cmd.AddCommand(newGroupListCmd(), newGroupCreateCmd(), newGroupRenameCmd(), newGroupColorCmd(), newGroupPathCmd(),
 		newGroupDeleteCmd(), newGroupArchiveCmd(), newGroupUnarchiveCmd(),
 		newGroupCollapseCmd("collapse", true), newGroupCollapseCmd("expand", false))
 	return cmd
@@ -48,7 +49,7 @@ func newGroupListCmd() *cobra.Command {
 					}
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "GROUP\tCOLOR\tSESSIONS\tSTATE")
+				fmt.Fprintln(tw, "KIND\tGROUP\tCOLOR\tSESSIONS\tPATH\tSTATE")
 				for _, g := range snap.Groups {
 					if !g.ArchivedAt.IsZero() && !all {
 						continue
@@ -60,7 +61,7 @@ func newGroupListCmd() *cobra.Command {
 					case snap.ViewState.IsCollapsed(g.ID):
 						state = "collapsed"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", g.Name, g.Color, counts[g.ID], state)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", g.KindMark(), g.Name, g.Color, counts[g.ID], tildeHome(g.Path), state)
 				}
 				return tw.Flush()
 			})
@@ -71,24 +72,72 @@ func newGroupListCmd() *cobra.Command {
 }
 
 func newGroupCreateCmd() *cobra.Command {
-	var color string
+	var color, folder string
 	cmd := &cobra.Command{
 		Use:   "create <name>",
-		Short: "Create a group",
+		Short: "Create a group, or with --folder a folder",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := folderPath(folder)
+			if err != nil {
+				return err
+			}
 			return withClient(cmd.Context(), func(c *client, _ snapshot) error {
-				g, err := createGroup(c, args[0], color)
-				if err != nil {
+				var g ipc.Group
+				if err := c.mutate(ipc.Mutation{Kind: ipc.MutGroupCreate, Text: args[0], Color: color, Path: path}, &g); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Created group %q (%s)\n", g.Name, g.Color)
+				if g.Path != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "Created folder %q (%s) at %s\n", g.Name, g.Color, tildeHome(g.Path))
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "Created group %q (%s)\n", g.Name, g.Color)
+				}
 				return nil
 			})
 		},
 	}
 	cmd.Flags().StringVar(&color, "color", "", "blue, magenta, cyan, yellow, green or red (default: next in the palette)")
+	cmd.Flags().StringVar(&folder, "folder", "", "make it a folder at this path, made if it's missing: new sessions in it start there")
 	return cmd
+}
+
+func newGroupPathCmd() *cobra.Command {
+	var clearPath bool
+	cmd := &cobra.Command{
+		Use:   "path <group> <path>|--clear",
+		Short: "Make a group a folder at a path (made if it's missing), or with --clear a group again",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if clearPath == (len(args) == 2) {
+				return usageError{errors.New("give a path, or --clear")}
+			}
+			path := ""
+			if !clearPath {
+				var err error
+				if path, err = folderPath(args[1]); err != nil {
+					return err
+				}
+			}
+			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
+				g, err := resolveGroup(snap, args[0])
+				if err != nil {
+					return err
+				}
+				return c.mutate(ipc.Mutation{Kind: ipc.MutGroupPath, GroupID: g.ID, Path: path, Host: g.Host}, nil)
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&clearPath, "clear", false, "clear the path: it's a group again")
+	return cmd
+}
+
+// folderPath is a folder's path as the daemon takes it: absolute, from the
+// current folder here; with --host, as given, for the host to resolve.
+func folderPath(path string) (string, error) {
+	if path == "" || targetHost != "" || filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
+		return path, nil
+	}
+	return filepath.Abs(path)
 }
 
 func groupMutation(use, short string, nargs int, build func(g *core.Group, args []string) ipc.Mutation) *cobra.Command {
