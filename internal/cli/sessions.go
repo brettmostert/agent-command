@@ -20,33 +20,35 @@ import (
 // now is swappable in tests.
 var now = time.Now
 
+// listSorts are acmd list's sort keys.
+var listSorts = []string{"created", "name", "activity", "status", "cwd"}
+
 func newListCmd() *cobra.Command {
-	var (
-		all, desc                   bool
-		group, status, filter, view string
-		sortKey                     string
-	)
+	var vs core.ViewState
+	var group, status string
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List the sessions the app runs",
-		Args:  cobra.NoArgs,
+		Short: "List the sessions the app runs, with their ids",
+		Long: "Lists the sessions, this machine's and your Remote hosts', with the id commands take. How it's\n" +
+			"laid out is the command's own: the flags, each time. The daemon keeps no view.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if vs.Mode != "groups" && vs.Mode != "list" {
+				return usageError{fmt.Errorf("--mode is groups or list, not %q", vs.Mode)}
+			}
+			if !slices.Contains(listSorts, vs.Sort) {
+				return usageError{fmt.Errorf("--sort is %s, not %q", strings.Join(listSorts, ", "), vs.Sort)}
+			}
 			return withClient(cmd.Context(), func(_ *client, snap snapshot) error {
-				vs := snap.ViewState
-				if all {
-					vs.ShowArchived = true
+				var wantGroup *core.Group
+				if group != "" {
+					g, err := resolveGroupAnywhere(snap, group)
+					if err != nil {
+						return err
+					}
+					wantGroup = g
 				}
-				if cmd.Flags().Changed("filter") {
-					vs.Filter = filter
-				}
-				if view != "" {
-					vs.Mode = view
-				}
-				if sortKey != "" {
-					vs.Sort, vs.Desc = sortKey, desc
-				}
-				rows := listRows(snap, vs)
-				rows = filterRows(rows, snap, group, status)
+				rows := filterRows(listRows(snap, vs), wantGroup, status)
 				if jsonOut {
 					return writeListJSON(jsonWriter(cmd), snap, rows)
 				}
@@ -55,56 +57,43 @@ func newListCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.BoolVar(&all, "all", false, "include archived sessions")
-	f.StringVar(&group, "group", "", "only sessions in this group")
+	f.StringVar(&vs.Mode, "mode", "groups", "groups, or list: one list, not in groups")
+	f.StringVar(&vs.Sort, "sort", "created", strings.Join(listSorts, ", "))
+	f.BoolVar(&vs.Desc, "desc", false, "sort descending")
+	f.BoolVar(&vs.ShowArchived, "archived", false, "include archived sessions and groups")
+	f.StringVar(&vs.Filter, "filter", "", "only sessions with this text in them (g:<group name> matches a group's)")
+	f.StringVar(&group, "group", "", "only sessions in this group, by id")
 	f.StringVar(&status, "status", "", "only these statuses (comma-separated, e.g. busy,waiting)")
-	f.StringVar(&filter, "filter", "", "filter text (g:<group> works)")
-	f.StringVar(&view, "view", "", "groups or list (default: set with acmd view-mode)")
-	f.StringVar(&sortKey, "sort", "", "created, name, activity, status or cwd (default: set with acmd sort)")
-	f.BoolVar(&desc, "desc", false, "sort descending (with --sort)")
 	return cmd
 }
 
 type listRow struct {
-	Number  int
 	Session *core.Session
 	Group   *core.Group
 }
 
-// listRows lays sessions out like the sidebar and also includes sessions in
-// collapsed groups (unnumbered), so `acmd list` shows everything.
+// listRows lays the sessions out in vs, as the sidebar does, every group open.
 func listRows(snap snapshot, vs core.ViewState) []listRow {
-	numbers := map[string]int{}
+	var out []listRow
 	for _, r := range core.Layout(snap.Sessions, snap.Groups, vs) {
 		if r.Session != nil {
-			numbers[r.Session.ID] = r.Number
-		}
-	}
-	expanded := make([]*core.Group, len(snap.Groups))
-	for i, g := range snap.Groups {
-		cp := *g
-		cp.Collapsed = false
-		expanded[i] = &cp
-	}
-	open := vs
-	open.Collapsed = nil
-	var out []listRow
-	for _, r := range core.Layout(snap.Sessions, expanded, open) {
-		if r.Session != nil {
-			out = append(out, listRow{Number: numbers[r.Session.ID], Session: r.Session, Group: r.Group})
+			out = append(out, listRow{Session: r.Session, Group: r.Group})
 		}
 	}
 	return out
 }
 
-func filterRows(rows []listRow, snap snapshot, group, status string) []listRow {
-	var wantGroup *core.Group
-	if group != "" {
-		wantGroup, _ = resolveGroup(snap, group)
-		if wantGroup == nil {
-			return nil
+// resolveGroupAnywhere finds a group by id on this machine or a host.
+func resolveGroupAnywhere(snap snapshot, id string) (*core.Group, error) {
+	for _, g := range snap.Groups {
+		if g.ID == strings.TrimSpace(id) {
+			return g, nil
 		}
 	}
+	return resolveGroup(snap, id)
+}
+
+func filterRows(rows []listRow, wantGroup *core.Group, status string) []listRow {
 	statuses := map[string]bool{}
 	for _, s := range strings.Split(status, ",") {
 		if s = strings.TrimSpace(s); s != "" {
@@ -113,7 +102,7 @@ func filterRows(rows []listRow, snap snapshot, group, status string) []listRow {
 	}
 	var out []listRow
 	for _, r := range rows {
-		if wantGroup != nil && r.Session.GroupID != wantGroup.ID {
+		if wantGroup != nil && (r.Session.GroupID != wantGroup.ID || r.Session.Host != wantGroup.Host) {
 			continue
 		}
 		if len(statuses) > 0 && !statuses[string(r.Session.Status)] {
@@ -130,12 +119,8 @@ func writeListTable(w io.Writer, rows []listRow) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tSTATUS\tGROUP\tNAME\tDIR\tWHERE\tLAST")
+	fmt.Fprintln(tw, "ID\tSTATUS\tGROUP\tNAME\tDIR\tWHERE\tLAST")
 	for _, r := range rows {
-		num := "-"
-		if r.Number > 0 {
-			num = fmt.Sprint(r.Number)
-		}
 		status := string(r.Session.Status)
 		if r.Session.Unseen {
 			status += "•"
@@ -144,15 +129,14 @@ func writeListTable(w io.Writer, rows []listRow) error {
 		if r.Group != nil {
 			group = r.Group.Name
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", num, status, group, display(r.Session.Name, 40),
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Session.ID, status, group, display(r.Session.Name, 40),
 			filepath.Base(r.Session.Cwd), where(r.Session), age(r.Session))
 	}
 	return tw.Flush()
 }
 
 // writeListJSON is list --json: the rows' sessions as the daemon sent them
-// (internal/ipc.Session), in the list's order. Numbers aren't in it: scripts
-// name sessions by id.
+// (internal/ipc.Session), in the list's order.
 func writeListJSON(w io.Writer, snap snapshot, rows []listRow) error {
 	byID := map[string]*ipc.Session{}
 	for _, s := range snap.Snapshot.Sessions {
@@ -216,9 +200,9 @@ func display(s string, limit int) string {
 func newRenameCmd() *cobra.Command {
 	var to string
 	cmd := &cobra.Command{
-		Use:     "rename <N|id|name-prefix>… --to <name> | rename <session> <new name>",
+		Use:     "rename <id>… --to <name> | rename <session> <new name>",
 		Short:   "Rename sessions (several are numbered: \"api - 1\", \"api - 2\")",
-		Example: "  acmd rename 2 api\n  acmd rename 1 2 3 --to api   # api - 1, api - 2, api - 3",
+		Example: "  acmd rename <id> api\n  acmd rename <id> <id> <id> --to api   # api - 1, api - 2, api - 3",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sel, name := args, to
@@ -283,7 +267,7 @@ func reportResults(w io.Writer, res ipc.Results, done string) error {
 
 func newDescribeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "describe <N|id|name-prefix> <text>",
+		Use:   "describe <id> <text>",
 		Short: "Set a session's description (empty text clears it)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -301,7 +285,7 @@ func newDescribeCmd() *cobra.Command {
 func newArchiveCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "archive <N|id|name-prefix>…",
+		Use:   "archive <id>…",
 		Short: "Archive sessions (ends them; an agent's conversation is kept)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -336,7 +320,7 @@ func newArchiveCmd() *cobra.Command {
 func newFinishCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "finish <N|id|name-prefix>",
+		Use:   "finish <id>",
 		Short: "Finish a session: its agent stops; it stays listed and showing it resumes it",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -363,12 +347,11 @@ func newFinishCmd() *cobra.Command {
 
 func newUnarchiveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "unarchive <id|name-prefix>",
+		Use:   "unarchive <id>",
 		Short: "Bring an archived session back (as paused)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				snap.ViewState.ShowArchived = true
 				s, err := resolveSession(snap, args[0])
 				if err != nil {
 					return err
@@ -380,19 +363,24 @@ func newUnarchiveCmd() *cobra.Command {
 }
 
 func newMoveCmd() *cobra.Command {
-	var create, noGroup bool
+	var noGroup bool
+	var newGroup string
 	cmd := &cobra.Command{
-		Use:   "move <N|id|name-prefix>... <group>|--no-group",
+		Use:   "move <id>... <group id> | move <id>... --new-group <name> | move <id>... --no-group",
 		Short: "Move sessions to a group, or out of their group",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !noGroup && len(args) < 2 {
-				return usageError{errors.New("give the sessions and a group, or --no-group")}
+			if noGroup && newGroup != "" {
+				return usageError{errors.New("give --new-group or --no-group, not both")}
+			}
+			ownGroup := !noGroup && newGroup == "" // the last argument is the group's id
+			if ownGroup && len(args) < 2 {
+				return usageError{errors.New("give the sessions and a group's id, --new-group <name> or --no-group")}
 			}
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				sel, groupName := args, ""
-				if !noGroup {
-					sel, groupName = args[:len(args)-1], args[len(args)-1]
+				sel, groupID := args, ""
+				if ownGroup {
+					sel, groupID = args[:len(args)-1], args[len(args)-1]
 				}
 				ids, err := resolveSessions(snap, sel)
 				if err != nil {
@@ -408,23 +396,15 @@ func newMoveCmd() *cobra.Command {
 				if noGroup {
 					return c.mutate(ipc.Mutation{Kind: ipc.MutMove, Targets: ids, Host: host}, nil)
 				}
-				g, err := liveGroupOn(snap, groupName, host)
+				g, err := groupFor(c, snap, groupID, newGroup, host)
 				if err != nil {
-					if errors.As(err, new(archivedGroupError)) {
-						return err
-					}
-					if !create {
-						return fmt.Errorf("%w (use --create to create it)", err)
-					}
-					if g, err = createGroupOn(c, groupName, "", host); err != nil {
-						return err
-					}
+					return err
 				}
 				return c.mutate(ipc.Mutation{Kind: ipc.MutMove, Targets: ids, GroupID: g.ID, Host: host}, nil)
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&create, "create", false, "create the group if it doesn't exist")
+	cmd.Flags().StringVar(&newGroup, "new-group", "", "make a group with this name, and move them into it")
 	cmd.Flags().BoolVar(&noGroup, "no-group", false, "take the sessions out of their group")
 	return cmd
 }
@@ -436,5 +416,14 @@ func createGroupOn(c *client, name, color, host string) (*core.Group, error) {
 		return nil, err
 	}
 	g.Host = host
-	return g.Core(false), nil
+	return g.Core(), nil
+}
+
+// groupFor is the group sessions go into on host: the live one with id, or
+// with newName a new one of that name. A name never picks a group.
+func groupFor(c *client, snap snapshot, id, newName, host string) (*core.Group, error) {
+	if newName != "" {
+		return createGroupOn(c, newName, "", host)
+	}
+	return liveGroupOn(snap, id, host)
 }

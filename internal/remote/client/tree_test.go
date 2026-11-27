@@ -23,7 +23,7 @@ func TestTreeFollowsEachEvent(t *testing.T) {
 		{Type: ipc.EventAdded, Entity: ipc.EntityGroup, ID: "g", Data: data(ipc.Group{ID: "g", Name: "G"})},
 		{Type: ipc.EventAdded, Entity: ipc.EntitySet, ID: "s", Data: data(ipc.Set{Type: ipc.EntitySet, ID: "s", Parent: "g"})},
 		{Type: ipc.EventAdded, Entity: ipc.EntityInbox, ID: "7", Data: data(core.InboxItem{ID: 7, SessionID: "a", State: core.InboxOpen})},
-		{Type: ipc.EventUpdated, Entity: ipc.EntityView, Data: data(ipc.ViewState{})}, // not followed
+		{Type: ipc.EventUpdated, Entity: ipc.EntitySettings, Data: data(map[string]any{})}, // not followed
 	}
 	for _, ev := range steps {
 		if n := tr.apply(ev); n != nil {

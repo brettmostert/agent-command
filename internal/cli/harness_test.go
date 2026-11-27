@@ -46,10 +46,10 @@ func TestHarnessCommands(t *testing.T) {
 	mustRun(t, "schedule", "add", "Nightly", "--cron", "0 2 * * *", "--prompt", "go", "--harness", "job")
 	_, err = acmd(t, "harness", "remove", "Job", "--yes")
 	errContains(t, err, "runs scheduled jobs")
-	if out := mustRun(t, "schedule", "show", "Nightly"); !strings.Contains(out, "Harness   Job (Claude)") {
+	if out := mustRun(t, "schedule", "show", jobID(t, "Nightly")); !strings.Contains(out, "Harness   Job (Claude)") {
 		t.Errorf("show: %s", out)
 	}
-	mustRun(t, "schedule", "delete", "Nightly", "--yes")
+	mustRun(t, "schedule", "delete", jobID(t, "Nightly"), "--yes")
 	if out := mustRun(t, "harness", "remove", "Job", "--yes"); !strings.Contains(out, "Removed Job.") {
 		t.Errorf("remove: %q", out)
 	}

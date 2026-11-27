@@ -67,13 +67,13 @@ func TestAttach(t *testing.T) {
 	fakeRunning(t, true)
 
 	fakeAttach(t, false, nil)
-	_, err := acmd(t, "attach", "api")
+	_, err := acmd(t, "attach", "L1")
 	errContains(t, err, "needs a terminal")
 
 	sockets := fakeAttach(t, true, nil)
-	mustRun(t, "attach", "api")
-	mustRun(t, "attach", "docs") // a host's session, as it shows here
-	mustRun(t, "--host", "studio", "attach", "docs")
+	mustRun(t, "attach", "L1")
+	mustRun(t, "attach", "r2") // a host's session, as it shows here
+	mustRun(t, "--host", "studio", "attach", "r2")
 	if want := []string{f.p.HostSocket("L1"), f.p.HostSocket("r2"), f.p.HostSocket("r2")}; strings.Join(*sockets, " ") != strings.Join(want, " ") {
 		t.Errorf("attached to %v, want %v", *sockets, want)
 	}
@@ -98,22 +98,24 @@ func TestAttach(t *testing.T) {
 	}
 
 	// --json prints the session once detached.
-	out := mustRun(t, "--json", "attach", "api")
+	out := mustRun(t, "--json", "attach", "L1")
 	var s ipc.Session
 	if err := json.Unmarshal([]byte(out), &s); err != nil || s.ID != "L1" {
 		t.Errorf("--json: %q %v", out, err)
 	}
 
 	fakeRunning(t, false)
-	_, err = acmd(t, "attach", "api")
+	_, err = acmd(t, "attach", "L1")
 	errContains(t, err, `"api" isn't running: resume it with acmd resume L1`)
 	fakeRunning(t, true)
-	_, err = acmd(t, "attach", "nope")
-	if err == nil {
-		t.Error("attached to a session that isn't there")
+	// A name, or a number in the list, never picks one.
+	for _, sel := range []string{"nope", "api", "1"} {
+		if _, err = acmd(t, "attach", sel); err == nil || !strings.Contains(err.Error(), "acmd find") {
+			t.Errorf("attach %s: %v", sel, err)
+		}
 	}
 	fakeAttach(t, true, errors.New("socket gone"))
-	_, err = acmd(t, "attach", "api")
+	_, err = acmd(t, "attach", "L1")
 	errContains(t, err, "socket gone")
 }
 
@@ -135,8 +137,8 @@ func TestInbox(t *testing.T) {
 	f.reply(ipc.OpMutate, nil)
 
 	out := mustRun(t, "inbox")
-	for _, want := range []string{"#  SESSION", "1  api", "studio", "permission", "Bash: make test  (1 Yes · 2 Yes, and don't ask again · 3 No)",
-		"2  docs", "done", "Docs are up to date."} {
+	for _, want := range []string{"ID         SESSION", "7          api", "studio:14  docs", "permission", "Bash: make test  (1 Yes · 2 Yes, and don't ask again · 3 No)",
+		"done", "Docs are up to date."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inbox lacks %q:\n%s", want, out)
 		}
@@ -149,9 +151,9 @@ func TestInbox(t *testing.T) {
 		t.Errorf("--json: %+v %v", items, err)
 	}
 
-	// By number and option number, by id and option text, a host's by host:id
+	// By id and option number, by id and option text, a host's by host:id
 	// with a reply.
-	if out := mustRun(t, "inbox", "answer", "1", "1"); !strings.Contains(out, `Answered the permission in "api".`) ||
+	if out := mustRun(t, "inbox", "answer", "7", "1"); !strings.Contains(out, `Answered the permission in "api".`) ||
 		!f.calledWith(ipc.OpInboxAnswer, `"id":7`, `"option":1`) {
 		t.Errorf("answer 1 1: %q %v", out, f.called())
 	}
@@ -164,18 +166,20 @@ func TestInbox(t *testing.T) {
 		t.Errorf("answer a host's: %q %v", out, f.called())
 	}
 	for args, want := range map[string]string{
-		"1 4":       "pick an option from 1 to 3",
-		"1 Maybe":   `"Maybe" isn't one of the options: 1 Yes`,
-		"3 A":       "several parts: answer it in the session (acmd attach L1)",
+		"7 4":       "pick an option from 1 to 3",
+		"7 Maybe":   `"Maybe" isn't one of the options: 1 Yes`,
+		"9 A":       "several parts: answer it in the session (acmd attach L1)",
 		"99 1":      "no Inbox item 99 is waiting",
+		"1 1":       "no Inbox item 1 is waiting", // its place in the list isn't its id
+		"#7 1":      "an item is its id",
 		"lab:1 x":   "lab has no Inbox item",
-		"first yes": "an item is its number",
+		"first yes": "an item is its id",
 	} {
 		_, err := acmd(t, append([]string{"inbox", "answer"}, strings.Fields(args)...)...)
 		errContains(t, err, want)
 	}
 
-	if out := mustRun(t, "inbox", "dismiss", "2", "#1"); !strings.Contains(out, "Dismissed 2.") ||
+	if out := mustRun(t, "inbox", "dismiss", "studio:14", "7"); !strings.Contains(out, "Dismissed 2.") ||
 		!f.calledWith(ipc.OpMutate, `"kind":"inbox.dismiss"`, `{"host":"studio","id":14}`, `{"id":7}`) {
 		t.Errorf("dismiss: %q %v", out, f.called())
 	}

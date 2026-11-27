@@ -138,7 +138,6 @@ func localOps() []Op {
 		mut(act(ipc.MutGroupDelete, "Deletes a group, and archives its sessions.", entities, nil, nil).destructive()),
 		mut(act(ipc.MutGroupArchive, "Archives a group and its sessions.", entities, nil, nil)),
 		mut(act(ipc.MutGroupUnarchive, "Unarchives a group, and optionally its sessions, under a new name if one is given.", entities, nil, nil)),
-		mut(act(ipc.MutGroupCollapse, "Collapses or expands a group, or every group.", entities, nil, nil)),
 		mut(act(ipc.MutGroupMove, "Moves a group to just after or just before another one.", entities, nil, nil)),
 
 		// Sets: sessions made together by splitting panes.
@@ -146,12 +145,6 @@ func localOps() []Op {
 		mut(act(ipc.MutSetAdd, "Adds a session to a set, after one of its members or at the end. It moves to the set's group.", entities, nil, nil)),
 		mut(act(ipc.MutSetRemove, "Takes a session out of its set. The set ends if one session is left.", entities, nil, nil)),
 		mut(act(ipc.MutSetEnd, "Ends a set. Its sessions stay where they are, on their own.", entities, nil, nil)),
-
-		// The CLI's view.
-		mut(act(ipc.MutViewMode, "Shows sessions in groups or as one list.", host, nil, nil)),
-		mut(act(ipc.MutViewSort, "Sets the sort key and direction.", host, nil, nil)),
-		mut(act(ipc.MutViewFilter, "Sets the text filter.", host, nil, nil)),
-		mut(act(ipc.MutViewArchived, "Shows or hides archived sessions.", host, nil, nil)),
 
 		// Inbox.
 		read(ipc.OpInbox, "Lists Inbox items, newest first: one session's, or everyone's.", entities, ipc.InboxRequest{}, ipc.InboxPage{}),

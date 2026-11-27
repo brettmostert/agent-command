@@ -19,7 +19,7 @@ const (
 )
 
 // keysHelp is the bottom line in the list.
-const keysHelp = "↑↓/jk move · enter attach (ctrl+] comes back) · a answer · n new · / filter · q quit"
+const keysHelp = "↑↓/jk move · enter attach (ctrl+] comes back) or fold · ←→ fold · a answer · n new · / filter · v view · s sort · S reverse · A archived · q quit"
 
 // View draws the list in the whole terminal.
 func (m Model) View() tea.View {
@@ -58,18 +58,21 @@ func (m Model) title() string {
 	if !m.loaded {
 		return "acmd · loading…"
 	}
-	n, waiting := 0, 0
-	for _, r := range m.rows {
-		if r.isSession() {
-			n++
-			if r.waiting != nil || r.s.Status.NeedsAttention() {
-				waiting++
-			}
+	t := fmt.Sprintf("acmd · %d sessions", m.total)
+	if m.needYou > 0 {
+		t += fmt.Sprintf(" · %d need you", m.needYou)
+	}
+	if m.view.mode() == "list" {
+		t += " · list"
+	}
+	if m.view.sort() != "created" || m.view.Desc {
+		t += " · by " + m.view.sort()
+		if m.view.Desc {
+			t += " ↓"
 		}
 	}
-	t := fmt.Sprintf("acmd · %d sessions", n)
-	if waiting > 0 {
-		t += fmt.Sprintf(" · %d need you", waiting)
+	if m.view.Archived {
+		t += " · archived shown"
 	}
 	if m.filter != "" {
 		t += " · filter: " + m.filter
@@ -86,12 +89,16 @@ func (m Model) lines(width int) []string {
 		case r.section != "":
 			line = bold + r.section + reset
 		case r.group != "":
-			line = "  " + colored(r.group, r.color)
+			fold := "  "
+			if r.isGroup() {
+				fold = map[bool]string{true: "▸ ", false: "▾ "}[r.collapsed]
+			}
+			line = "  " + fold + colored(r.group, r.color)
 		default:
 			line = "    " + sessionLine(r)
 		}
 		line = ansi.Truncate(line, width, "…")
-		if i == m.sel && r.isSession() {
+		if i == m.sel && r.selectable() {
 			line = reverse + ansi.Strip(line) + reset
 		}
 		out[i] = line

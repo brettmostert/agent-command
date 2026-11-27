@@ -152,15 +152,6 @@ pub const Group = struct {
     archived_at: []const u8 = "",
 };
 
-/// Mirrors Go `ipc.ViewState`.
-pub const ViewState = struct {
-    mode: []const u8 = "groups",
-    sort: []const u8 = "created",
-    desc: bool = false,
-    filter: []const u8 = "",
-    show_archived: bool = false,
-};
-
 /// Mirrors Go `ipc.Snapshot` (`internal/ipc/ipc.go`).
 pub const Snapshot = struct {
     sessions: ?[]const Session = null,
@@ -170,7 +161,6 @@ pub const Snapshot = struct {
     /// know (design 7.2): kept for their children's sake.
     others: ?[]const EntityRef = null,
     harnesses: ?[]const Harness = null,
-    view_state: ViewState = .{},
 
     /// What a session runs in, as a name: its harness's, its kind's when that
     /// was removed (or it's a host's), or "Terminal".
@@ -808,7 +798,7 @@ test "encodeRequest and decodeResponse match internal/ipc/ipc.go schemas" {
     );
 
     const go_snapshot_resp =
-        \\{"ok":true,"data":{"sessions":[{"id":"s1","name":"api","description":"fix bug","group_id":"g1","status":"waiting","unseen":true,"kind":"hosted","harness_kind":"claude","pid":123}],"groups":[{"id":"g1","type":"group","name":"Work","color":"#4EA7FC"}],"view_state":{"mode":"groups","sort":"activity","desc":true}}}
+        \\{"ok":true,"data":{"sessions":[{"id":"s1","name":"api","description":"fix bug","group_id":"g1","status":"waiting","unseen":true,"kind":"hosted","harness_kind":"claude","pid":123}],"groups":[{"id":"g1","type":"group","name":"Work","color":"#4EA7FC"}]}}
     ;
 
     var snap = try decodeResponse(Snapshot, allocator, go_snapshot_resp);
@@ -824,10 +814,6 @@ test "encodeRequest and decodeResponse match internal/ipc/ipc.go schemas" {
     const groups = snap.value.groups.?;
     try std.testing.expectEqual(@as(usize, 1), groups.len);
     try std.testing.expectEqualStrings("Work", groups[0].name);
-
-    try std.testing.expectEqualStrings("groups", snap.value.view_state.mode);
-    try std.testing.expectEqualStrings("activity", snap.value.view_state.sort);
-    try std.testing.expect(snap.value.view_state.desc);
 }
 
 // The snapshot as Go writes it (internal/ipc/testdata/wire): a field renamed
@@ -870,8 +856,6 @@ test "decodes the daemon's snapshot fixture" {
     try std.testing.expectEqual(@as(i32, 20), groups[1].order);
     // s3 is in no group: there's no group or parent to follow.
     try std.testing.expect(snap.value.groupOf(sessions[2]) == null);
-    try std.testing.expectEqualStrings("activity", snap.value.view_state.sort);
-    try std.testing.expect(snap.value.view_state.desc);
 }
 
 // The daemon's hello as Go writes it: the version agreed, its range and its

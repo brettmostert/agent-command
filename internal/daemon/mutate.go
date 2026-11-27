@@ -16,8 +16,6 @@ import (
 	"github.com/brettmostert/agent-command/internal/store"
 )
 
-var validSorts = map[string]bool{"created": true, "name": true, "activity": true, "status": true, "cwd": true}
-
 // snapshot is everything the apps show. clientID, when set, says which
 // client asks, for the warnings it dismissed.
 func (d *Daemon) snapshot(ctx context.Context, clientID string) (ipc.Snapshot, error) {
@@ -35,16 +33,6 @@ func (d *Daemon) snapshot(ctx context.Context, clientID string) (ipc.Snapshot, e
 	sets, err := d.store.Sets(ctx)
 	if err != nil {
 		return ipc.Snapshot{}, err
-	}
-	vs, err := d.store.ViewState(ctx)
-	if err != nil {
-		return ipc.Snapshot{}, err
-	}
-	vs.Collapsed = nil
-	for _, g := range groups {
-		if g.Collapsed {
-			vs.Collapsed = append(vs.Collapsed, g.ID)
-		}
 	}
 	queue, err := d.store.InboxQueue(ctx)
 	if err != nil {
@@ -67,7 +55,7 @@ func (d *Daemon) snapshot(ctx context.Context, clientID string) (ipc.Snapshot, e
 	// The known hosts' trees, as they have them.
 	tree := d.client.Tree()
 	return ipc.Snapshot{Sessions: append(ipc.SessionsOf(sessions), tree.Sessions...), Groups: append(ipc.GroupsOf(groups), tree.Groups...),
-		Sets: append(wireSets(sets), tree.Sets...), ViewState: ipc.ViewStateOf(vs), Notices: d.notices(), Inbox: d.withHostInbox(queue),
+		Sets: append(wireSets(sets), tree.Sets...), Notices: d.notices(), Inbox: d.withHostInbox(queue),
 		Jobs: jobs, Wake: wake, Remote: remote, RemoteHosts: d.remoteHosts(), Harnesses: d.harnesses(ctx).Harnesses,
 		Settings: config.Values(d.config()), Health: d.health(sessions, jobs, wake, remote), Dismissed: dismissed,
 		Features: d.features(), Update: d.update(), Speech: d.speechStatus()}, nil
@@ -145,20 +133,6 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 		return nil, d.archiveGroup(ctx, m.GroupID)
 	case ipc.MutGroupUnarchive:
 		return nil, d.unarchiveGroup(ctx, m.GroupID, m.Flag, m.Text)
-	case ipc.MutGroupCollapse:
-		if m.GroupID != "" {
-			return nil, st.SetGroupCollapsed(ctx, m.GroupID, m.Flag)
-		}
-		groups, err := st.Groups(ctx, false)
-		if err != nil {
-			return nil, err
-		}
-		for _, g := range groups {
-			if err := st.SetGroupCollapsed(ctx, g.ID, m.Flag); err != nil {
-				return nil, err
-			}
-		}
-		return nil, nil
 	case ipc.MutPurge:
 		if m.LocalID == "" {
 			return nil, invalid("purge takes ids")
@@ -166,20 +140,6 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 		return nil, d.purge(ctx, m.LocalID)
 	case ipc.MutGroupMove:
 		return nil, d.moveGroup(ctx, m.GroupID, m.After, m.Before)
-	case ipc.MutViewMode:
-		if m.Text != "groups" && m.Text != "list" {
-			return nil, fmt.Errorf("view mode must be groups or list, not %q", m.Text)
-		}
-		return nil, d.updateViewState(ctx, func(vs *core.ViewState) { vs.Mode = m.Text })
-	case ipc.MutViewSort:
-		if !validSorts[m.Text] {
-			return nil, fmt.Errorf("sort must be created, name, activity, status or cwd, not %q", m.Text)
-		}
-		return nil, d.updateViewState(ctx, func(vs *core.ViewState) { vs.Sort, vs.Desc = m.Text, m.Flag })
-	case ipc.MutViewFilter:
-		return nil, d.updateViewState(ctx, func(vs *core.ViewState) { vs.Filter = m.Text })
-	case ipc.MutViewArchived:
-		return nil, d.updateViewState(ctx, func(vs *core.ViewState) { vs.ShowArchived = m.Flag })
 	case ipc.MutInboxRead:
 		return nil, d.store.SetInboxRead(ctx, m.LocalItemIDs, m.Flag)
 	case ipc.MutInboxDismiss:
@@ -203,15 +163,6 @@ func (d *Daemon) updateSession(ctx context.Context, id string, fn func(*core.Ses
 		return err
 	}
 	return d.store.UpdateSession(ctx, s)
-}
-
-func (d *Daemon) updateViewState(ctx context.Context, fn func(*core.ViewState)) error {
-	vs, err := d.store.ViewState(ctx)
-	if err != nil {
-		return err
-	}
-	fn(&vs)
-	return d.store.PutViewState(ctx, vs)
 }
 
 // finish stops a session's host (its agent keeps the conversation) and marks

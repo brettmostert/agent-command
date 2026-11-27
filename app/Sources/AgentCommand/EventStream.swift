@@ -16,7 +16,7 @@ nonisolated struct SnapshotAssembler {
     ]
     /// The single values, and their field in the snapshot.
     private static let singles: [String: String] = [
-        "view": "view_state", "settings": "settings", "health": "health", "dismissed": "dismissed", "features": "features",
+        "settings": "settings", "health": "health", "dismissed": "dismissed", "features": "features",
         "update": "update", "speech": "speech", "remote": "remote", "wake": "wake",
     ]
 

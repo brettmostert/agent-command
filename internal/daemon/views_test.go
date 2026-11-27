@@ -86,24 +86,6 @@ func TestMoveGroup(t *testing.T) {
 	}
 }
 
-// Collapse is the CLI's view: the snapshot says which groups it has
-// collapsed in the view, not on each group.
-func TestCollapseIsInTheView(t *testing.T) {
-	p := testPaths(t)
-	start(t, p)
-	c := dial(t, p)
-	g := groupNamed(t, c, "A")
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCollapse, GroupID: g, Flag: true})
-	snap := snapshot(t, c)
-	if !snap.ViewState.IsCollapsed(g) || len(snap.ViewState.Collapsed) != 1 {
-		t.Errorf("view collapsed = %v, want [%s]", snap.ViewState.Collapsed, g)
-	}
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCollapse, GroupID: g, Flag: false})
-	if got := snapshot(t, c).ViewState.Collapsed; len(got) != 0 {
-		t.Errorf("after expanding: %v", got)
-	}
-}
-
 func TestPurge(t *testing.T) {
 	p := testPaths(t)
 	start(t, p)

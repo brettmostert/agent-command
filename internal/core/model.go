@@ -195,11 +195,8 @@ type Group struct {
 	Path string
 	// ParentID is the group it's inside ("" at the top). Groups nest two
 	// levels: a group with children is never inside another.
-	ParentID string
-	SortKey  int
-	// Collapsed is the CLI's view of the group; clients get it in
-	// ViewState.Collapsed, not with the group.
-	Collapsed  bool `json:"-"`
+	ParentID   string
+	SortKey    int
 	CreatedAt  time.Time
 	ArchivedAt time.Time
 }
@@ -215,16 +212,15 @@ func (g *Group) KindMark() string {
 	return "●"
 }
 
-// ViewState is the CLI's list presentation, kept by the daemon. Each other
-// client keeps its own view.
+// ViewState is how a client shows the list. Each client keeps its own: the
+// daemon keeps none.
 type ViewState struct {
 	Mode         string // "groups" | "list"
 	Sort         string // "created" | "name" | "activity" | "status" | "cwd"
 	Desc         bool
 	Filter       string
 	ShowArchived bool
-	// Collapsed are the collapsed groups' ids. The daemon fills it in from
-	// its groups when it sends the view.
+	// Collapsed are the collapsed groups' ids.
 	Collapsed []string `json:",omitempty"`
 }
 

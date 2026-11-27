@@ -45,6 +45,9 @@ type Options struct {
 	Me string
 	// Now is the clock (time.Now).
 	Now func() time.Time
+	// ViewFile is where the terminal UI keeps its own view (View): the mode,
+	// the sort, what's collapsed. "" keeps it only while it runs.
+	ViewFile string
 }
 
 // Run runs the terminal UI on in and out until it's quit.
@@ -77,11 +80,14 @@ type Model struct {
 	width  int
 	height int
 
-	mode   mode
-	filter string
-	input  string
-	item   *core.InboxItem // the item modeAnswer or modeReply answers
-	newOn  string          // the host modeNew starts on ("" for here)
+	view View // the terminal UI's own, from Options.ViewFile
+	// total and needYou count the sessions shown, a collapsed group's too.
+	total, needYou int
+	mode           mode
+	filter         string
+	input          string
+	item           *core.InboxItem // the item modeAnswer or modeReply answers
+	newOn          string          // the host modeNew starts on ("" for here)
 
 	// status is the line above the keys: the last notice, or what went wrong.
 	status string
@@ -95,22 +101,39 @@ type Model struct {
 // row is one line of the list: a section (this machine or a host), a group,
 // or a session.
 type row struct {
-	section string // a section header: "" for others
-	group   string // a group header: "" for others
-	color   string // the group's color (core.NormalizeColor)
-	host    string // the section's host ("" for this machine)
-	s       *core.Session
-	waiting *core.InboxItem // its open Inbox item, if any
+	section   string // a section header: "" for others
+	group     string // a group header: "" for others
+	groupID   string // the header's group ("" for No group), and a session's group
+	collapsed bool   // a group header's, in this view
+	color     string // the group's color (core.NormalizeColor)
+	host      string // the section's host ("" for this machine)
+	s         *core.Session
+	waiting   *core.InboxItem // its open Inbox item, if any
 }
 
 func (r row) isSession() bool { return r.s != nil }
+
+// isGroup says whether r is a group's header: No group's isn't, and never
+// collapses.
+func (r row) isGroup() bool { return r.group != "" && r.groupID != "" }
+
+// selectable says whether the cursor stops at r: a session or a group.
+func (r row) selectable() bool { return r.isSession() || r.isGroup() }
+
+// same says whether r and o are the same session or the same group.
+func (r row) same(o row) bool {
+	if r.isSession() || o.isSession() {
+		return r.isSession() && o.isSession() && r.s.ID == o.s.ID && r.s.Host == o.s.Host
+	}
+	return r.isGroup() && o.isGroup() && r.groupID == o.groupID && r.host == o.host
+}
 
 // New is the terminal UI's model, before anything is loaded.
 func New(o Options) Model {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return Model{o: o, exec: tea.Exec}
+	return Model{o: o, exec: tea.Exec, view: LoadView(o.ViewFile)}
 }
 
 // Messages.
@@ -265,9 +288,10 @@ func (m *Model) notice(ev ipc.Event) tea.Cmd {
 // build lays the rows out from the snapshot: this machine's sessions, then
 // each host's, each in its groups, with what's waiting.
 func (m *Model) build() {
-	var keep *core.Session
-	if s := m.selected(); s != nil {
-		keep = s
+	var keep *row
+	if m.sel < len(m.rows) && m.rows[m.sel].selectable() {
+		r := m.rows[m.sel]
+		keep = &r
 	}
 	sessions, groups := m.snap.CoreSessions(), m.snap.CoreGroups()
 	waiting := map[[2]string]*core.InboxItem{}
@@ -289,7 +313,7 @@ func (m *Model) build() {
 			hosts = append(hosts, s.Host)
 		}
 	}
-	m.rows = nil
+	m.rows, m.total, m.needYou = nil, 0, 0
 	for _, host := range append([]string{""}, hosts...) {
 		var hs []*core.Session
 		for _, s := range sessions {
@@ -300,18 +324,21 @@ func (m *Model) build() {
 		var hg []*core.Group
 		for _, g := range groups {
 			if g.Host == host {
-				cp := *g
-				cp.Collapsed = false // the list shows every session
-				hg = append(hg, &cp)
+				hg = append(hg, g)
 			}
 		}
-		// Grouped as in the sidebar, every group open; this machine's sort is
-		// its view's.
-		vs := core.ViewState{Mode: "groups", Filter: m.filter}
-		if host == "" {
-			vs.Sort, vs.Desc = m.snap.ViewState.Sort, m.snap.ViewState.Desc
-		}
+		// The host's structure, laid out in this view.
+		vs := m.view.layout(host, m.filter)
 		laid := core.Layout(hs, hg, vs)
+		vs.Collapsed = nil
+		for _, r := range core.Layout(hs, hg, vs) {
+			if r.Session != nil {
+				m.total++
+				if waiting[[2]string{host, r.Session.ID}] != nil || r.Session.Status.NeedsAttention() {
+					m.needYou++
+				}
+			}
+		}
 		title := "This machine"
 		if host != "" {
 			title = host + m.hostState(host)
@@ -326,14 +353,18 @@ func (m *Model) build() {
 				if r.Group != nil { // ▤ a folder, ● a group; No group has neither
 					title = strings.Repeat("  ", r.Depth) + r.Group.KindMark() + " " + title
 				}
-				gr := row{group: fmt.Sprintf("%s (%d)", title, r.Count), host: host}
+				gr := row{group: fmt.Sprintf("%s (%d)", title, r.Count), host: host, collapsed: r.Collapsed}
 				if r.Group != nil {
-					gr.color = r.Group.Color
+					gr.color, gr.groupID = r.Group.Color, r.Group.ID
 				}
 				m.rows = append(m.rows, gr)
 				continue
 			}
-			m.rows = append(m.rows, row{host: host, s: r.Session, waiting: waiting[[2]string{host, r.Session.ID}]})
+			sr := row{host: host, s: r.Session, waiting: waiting[[2]string{host, r.Session.ID}]}
+			if r.Group != nil {
+				sr.groupID = r.Group.ID
+			}
+			m.rows = append(m.rows, sr)
 		}
 	}
 	m.sel = m.find(keep)
@@ -349,19 +380,26 @@ func (m Model) hostState(name string) string {
 	return ""
 }
 
-// find is the row of s, else the first session row, else 0.
-func (m Model) find(s *core.Session) int {
-	first := -1
+// find is the row of keep (a session or a group), else the first session
+// row, else the first row the cursor stops at, else 0.
+func (m Model) find(keep *row) int {
+	first, firstSession := -1, -1
 	for i, r := range m.rows {
-		if !r.isSession() {
+		if !r.selectable() {
 			continue
 		}
 		if first < 0 {
 			first = i
 		}
-		if s != nil && r.s.ID == s.ID && r.s.Host == s.Host {
+		if firstSession < 0 && r.isSession() {
+			firstSession = i
+		}
+		if keep != nil && r.same(*keep) {
 			return i
 		}
+	}
+	if firstSession >= 0 {
+		return firstSession
 	}
 	return max(first, 0)
 }
@@ -374,10 +412,10 @@ func (m Model) selected() *core.Session {
 	return nil
 }
 
-// move selects the next session row in dir (+1 or -1), if there is one.
+// move selects the next session or group in dir (+1 or -1), if there is one.
 func (m *Model) move(dir int) {
 	for i := m.sel + dir; i >= 0 && i < len(m.rows); i += dir {
-		if m.rows[i].isSession() {
+		if m.rows[i].selectable() {
 			m.sel = i
 			return
 		}
@@ -444,12 +482,29 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.filter = ""
 			m.build()
 		}
-	case "enter":
+	case "enter", "space":
+		if m.sel < len(m.rows) && m.rows[m.sel].isGroup() {
+			return m.collapse(!m.rows[m.sel].collapsed)
+		}
 		s := m.selected()
-		if s == nil || m.o.Attach == nil {
+		if key == "space" || s == nil || m.o.Attach == nil {
 			return m, nil
 		}
 		return m, m.exec(m.o.Attach(*ipc.SessionOf(s)), func(err error) tea.Msg { return attachedMsg{err} })
+	case "left", "h":
+		return m.collapse(true)
+	case "right", "l":
+		return m.collapse(false)
+	case "v":
+		return m.changeView(func(v *View) {
+			v.Mode = map[string]string{"groups": "list", "list": "groups"}[v.mode()]
+		})
+	case "s":
+		return m.changeView(func(v *View) { v.Sort = v.nextSort() })
+	case "S":
+		return m.changeView(func(v *View) { v.Desc = !v.Desc })
+	case "A":
+		return m.changeView(func(v *View) { v.Archived = !v.Archived })
 	case "a":
 		return m.answer()
 	case "n":
@@ -458,6 +513,42 @@ func (m Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.newOn == "" && !m.sessionsHere() {
 			m.mode, m.status = modeList, "✗ this machine runs no sessions, and has no host to start one on: acmd remote add"
 		}
+	}
+	return m, nil
+}
+
+// collapse collapses or expands the selected group, or the selected
+// session's group. Collapsing from a session leaves the cursor on its group.
+func (m Model) collapse(collapsed bool) (tea.Model, tea.Cmd) {
+	if m.sel >= len(m.rows) || m.view.mode() == "list" {
+		return m, nil
+	}
+	r := m.rows[m.sel]
+	if r.groupID == "" || r.isGroup() && r.collapsed == collapsed {
+		return m, nil
+	}
+	if r.isSession() && !collapsed {
+		return m, nil // a session's group is open already
+	}
+	if r.isSession() {
+		for i := m.sel; i >= 0; i-- { // its header, the nearest group above
+			if g := m.rows[i]; g.isGroup() && g.groupID == r.groupID && g.host == r.host {
+				m.sel = i
+				break
+			}
+		}
+	}
+	host, id := r.host, r.groupID
+	return m.changeView(func(v *View) { v.setCollapsed(host, id, collapsed) })
+}
+
+// changeView changes the terminal UI's view, lays the list out again and
+// keeps it in the view file.
+func (m Model) changeView(change func(*View)) (tea.Model, tea.Cmd) {
+	change(&m.view)
+	m.build()
+	if err := SaveView(m.o.ViewFile, m.view); err != nil {
+		m.status = "✗ the view isn't saved: " + err.Error()
 	}
 	return m, nil
 }

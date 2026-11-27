@@ -27,16 +27,17 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 	root.SetErr(stderr)
 	root.AddCommand(newReportCmd(), newVersionCmd(), newPathsCmd(), newDaemonCmd(), newServiceCmd(), newHookCmd(),
 		newListCmd(), newScreenCmd(), newRenameCmd(), newDescribeCmd(), newFinishCmd(), newArchiveCmd(), newUnarchiveCmd(), newMoveCmd(),
-		newGroupCmd(), newViewModeCmd(), newSortCmd(),
+		newGroupCmd(), newFindCmd(),
 		newInitCmd(), newUninstallCmd(), newEditorCmd(), newAgentRemoteControlCmd(), newRemoteControlCmd(), newConfigCmd(), newKeysCmd(), newDoctorCmd(),
 		newNewCmd(), newResumeCmd(), newAttachCmd(), newInboxCmd(), newWatchCmd(), newClientsCmd(), newEventsCmd(), newSpeechCmd(), newHostCmd(), newOpenCmd(), newEditCmd(), newPurgeCmd(), newScheduleCmd(), newHarnessCmd())
 	root.AddCommand(newRemoteCmd())
+	completeIDs(root)
 	// Cobra provides the `completion` command (zsh, bash, fish, powershell).
 
 	// Using acmd for the first time offers setup.
 	for _, c := range root.Commands() {
 		switch c.Name() {
-		case "list", "rename", "describe", "archive", "unarchive", "move", "group", "view-mode", "sort",
+		case "list", "find", "rename", "describe", "archive", "unarchive", "move", "group",
 			"new", "resume", "attach", "inbox", "open", "purge", "schedule":
 			c.Annotations = map[string]string{needsSetup: "yes"}
 		}
@@ -44,7 +45,7 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 	// --host: the commands that are a daemon's ops run against a Remote host.
 	for _, c := range root.Commands() {
 		switch c.Name() {
-		case "list", "screen", "rename", "describe", "finish", "archive", "unarchive", "move", "group", "view-mode", "sort",
+		case "list", "find", "screen", "rename", "describe", "finish", "archive", "unarchive", "move", "group",
 			"new", "resume", "attach", "purge", "schedule", "config", "clients", "keys":
 			markOnHost(c)
 		}
@@ -53,8 +54,8 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 		"run against this Remote host (a known host's name) instead of this machine; ACMD_HOST sets a default")
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false,
 		"print the answer of the op the command runs, in the daemon's wire types, and errors as JSON on stderr")
-	root.Long += "\n\nCommands run against this machine's daemon, or with --host a Remote host's. Scripts should name\n" +
-		"sessions by id: numbers follow the list's order, which changes.\n\n" + exitCodesHelp
+	root.Long += "\n\nCommands run against this machine's daemon, or with --host a Remote host's. They take ids, never\n" +
+		"names: acmd find <name> and acmd group find <name> print the ids.\n\n" + exitCodesHelp
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	usageArgs(root)
 	root.PersistentPostRunE = func(*cobra.Command, []string) error { return finishOutput() }
@@ -81,6 +82,12 @@ func NewRootCmd(name string, stdout, stderr io.Writer) *cobra.Command {
 
 // usageArgs makes wrong arguments a usage error (exit 2), on every command.
 func usageArgs(c *cobra.Command) {
+	// A command made only of others (acmd group) refuses one it doesn't have,
+	// as acmd does: a gone command fails, not prints help and succeeds.
+	if c.HasParent() && c.HasSubCommands() && c.Run == nil && c.RunE == nil {
+		c.Args = cobra.NoArgs
+		c.RunE = func(cmd *cobra.Command, _ []string) error { return cmd.Help() }
+	}
 	if args := c.Args; args != nil {
 		c.Args = func(cmd *cobra.Command, a []string) error {
 			if err := args(cmd, a); err != nil {

@@ -63,6 +63,7 @@ type uiApp struct {
 	cssProvider *gtk.CssProvider
 	sel         Selection
 	filter      string
+	collapsed   []string // the groups collapsed in this UI's own view
 	rowMap      map[int]rowTarget
 	terminals   map[string]*VTETerminal // keyed by SessionKey(host, id)
 	lastSeq     uint64
@@ -419,9 +420,10 @@ func (u *uiApp) renderSidebar(ctx context.Context) {
 	u.mu.Lock()
 	filter := u.filter
 	sel := u.sel
+	collapsed := slices.Clone(u.collapsed)
 	u.mu.Unlock()
 
-	model := BuildSidebar(snap, filter)
+	model := BuildSidebar(snap, filter, collapsed)
 
 	for {
 		child := u.list.GetFirstChild()
@@ -551,24 +553,11 @@ func (u *uiApp) onRowActivated(ctx context.Context, index int) {
 	}
 
 	if target.isGroup {
-		snap, _, has := u.store.Snapshot()
-		if !has {
-			return
-		}
-		collapsed := false
-		for _, id := range snap.ViewState.Collapsed {
-			if id == target.groupID {
-				collapsed = true
-				break
-			}
-		}
-		go func() {
-			_ = u.client.Call(ctx, ipc.OpMutate, ipc.Mutation{
-				Kind:    ipc.MutGroupCollapse,
-				GroupID: target.groupID,
-				Flag:    !collapsed,
-			}, nil)
-		}()
+		// Collapse is this UI's own view: the daemon isn't told.
+		u.mu.Lock()
+		u.collapsed = toggleCollapsed(u.collapsed, target.groupID)
+		u.mu.Unlock()
+		u.renderSidebar(ctx)
 		return
 	}
 
@@ -871,8 +860,9 @@ func (u *uiApp) selectSessionNumber(ctx context.Context, num int) {
 	}
 	u.mu.Lock()
 	filter := u.filter
+	collapsed := slices.Clone(u.collapsed)
 	u.mu.Unlock()
-	model := BuildSidebar(snap, filter)
+	model := BuildSidebar(snap, filter, collapsed)
 	for _, r := range model.Rows {
 		if !r.IsHeader() && r.Number == num && r.Session != nil {
 			host := ""

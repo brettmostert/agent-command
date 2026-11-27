@@ -61,9 +61,9 @@ func newScheduleListCmd() *cobra.Command {
 					return nil
 				}
 				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "JOB\tSCHEDULE\tNEXT\tLAST\tSTATE")
+				fmt.Fprintln(tw, "ID\tJOB\tSCHEDULE\tNEXT\tLAST\tSTATE")
 				for _, j := range snap.Jobs {
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", j.Name, jobSchedule(j), whenText(j.NextRun), lastText(j.LastRun), jobState(j))
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", j.ID, j.Name, jobSchedule(j), whenText(j.NextRun), lastText(j.LastRun), jobState(j))
 				}
 				return tw.Flush()
 			})
@@ -73,7 +73,7 @@ func newScheduleListCmd() *cobra.Command {
 
 func newScheduleShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <job>",
+		Use:   "show <job id>",
 		Short: "Show a job: its schedule, prompt, settings and latest runs",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -264,7 +264,7 @@ func newScheduleEditCmd() *cobra.Command {
 	var f jobFlags
 	var name string
 	cmd := &cobra.Command{
-		Use:   "edit <job>",
+		Use:   "edit <job id>",
 		Short: "Change a scheduled job: only the flags given change",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -309,7 +309,7 @@ func saveJob(out io.Writer, c *client, snap snapshot, j core.Job, verb string) e
 	if err := c.call(ipc.OpJobSave, j, &saved); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "%s %q: %s.", verb, saved.Name, jobSchedule(&saved))
+	fmt.Fprintf(out, "%s %q (%s): %s.", verb, saved.Name, saved.ID, jobSchedule(&saved))
 	if !saved.NextRun.IsZero() {
 		fmt.Fprintf(out, " Next run %s.", whenText(saved.NextRun))
 	}
@@ -324,7 +324,7 @@ func newSchedulePauseCmd(use string, pause bool) *cobra.Command {
 		short = "Resume a paused job"
 	}
 	return &cobra.Command{
-		Use:   use + " <job>",
+		Use:   use + " <job id>",
 		Short: short,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -349,7 +349,7 @@ func newSchedulePauseCmd(use string, pause bool) *cobra.Command {
 
 func newScheduleRunCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "run <job>",
+		Use:   "run <job id>",
 		Short: "Run a job now, outside its schedule",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -377,7 +377,7 @@ func newScheduleRunCmd() *cobra.Command {
 
 func newScheduleRunsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "runs <job>",
+		Use:   "runs <job id>",
 		Short: "List a job's runs, newest first",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -400,7 +400,7 @@ func newScheduleRunsCmd() *cobra.Command {
 func newScheduleDeleteCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "delete <job>",
+		Use:   "delete <job id>",
 		Short: "Delete a job and its runs (its sessions stay)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -489,35 +489,14 @@ func newScheduleSettingsCmd() *cobra.Command {
 
 // resolveJob finds a job by id, or by name: exact, then a unique prefix,
 // ignoring case.
-func resolveJob(snap snapshot, sel string) (*core.Job, error) {
-	sel = strings.TrimSpace(sel)
+func resolveJob(snap snapshot, id string) (*core.Job, error) {
+	id = strings.TrimSpace(id)
 	for _, j := range snap.Jobs {
-		if j.ID == sel {
+		if j.ID == id {
 			return j, nil
 		}
 	}
-	for _, j := range snap.Jobs {
-		if strings.EqualFold(j.Name, sel) {
-			return j, nil
-		}
-	}
-	var matches []*core.Job
-	for _, j := range snap.Jobs {
-		if sel != "" && strings.HasPrefix(strings.ToLower(j.Name), strings.ToLower(sel)) {
-			matches = append(matches, j)
-		}
-	}
-	switch len(matches) {
-	case 1:
-		return matches[0], nil
-	case 0:
-		return nil, fmt.Errorf("no job named %q (see `acmd schedule list`)", sel)
-	}
-	names := make([]string, len(matches))
-	for i, j := range matches {
-		names[i] = fmt.Sprintf("%q", j.Name)
-	}
-	return nil, fmt.Errorf("%q could be %s", sel, strings.Join(names, " or "))
+	return nil, fmt.Errorf("no job %q: give its id (see acmd schedule list)", id)
 }
 
 // parseOnce reads a one-off time, in the host's time zone.

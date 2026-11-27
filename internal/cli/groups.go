@@ -16,13 +16,12 @@ import (
 func newGroupCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "group", Short: "Manage session groups"}
 	cmd.AddCommand(newGroupListCmd(), newGroupCreateCmd(), newGroupRenameCmd(), newGroupColorCmd(), newGroupPathCmd(), newGroupNestCmd(),
-		newGroupDeleteCmd(), newGroupArchiveCmd(), newGroupUnarchiveCmd(),
-		newGroupCollapseCmd("collapse", true), newGroupCollapseCmd("expand", false))
+		newGroupDeleteCmd(), newGroupArchiveCmd(), newGroupUnarchiveCmd(), newGroupFindCmd())
 	return cmd
 }
 
 func newGroupListCmd() *cobra.Command {
-	var all bool
+	var archived bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List groups",
@@ -31,7 +30,7 @@ func newGroupListCmd() *cobra.Command {
 			return withClient(cmd.Context(), func(_ *client, snap snapshot) error {
 				groups := []*ipc.Group{} // the daemon's, in order
 				for _, g := range snap.Groups {
-					if g.ArchivedAt.IsZero() || all {
+					if g.ArchivedAt.IsZero() || archived {
 						for _, w := range snap.Snapshot.Groups {
 							if w.ID == g.ID {
 								groups = append(groups, w)
@@ -49,9 +48,9 @@ func newGroupListCmd() *cobra.Command {
 					}
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "KIND\tGROUP\tCOLOR\tSESSIONS\tPATH\tSTATE")
+				fmt.Fprintln(tw, "ID\tKIND\tGROUP\tCOLOR\tSESSIONS\tPATH\tSTATE")
 				for _, g := range nestedOrder(snap.Groups) {
-					if !g.ArchivedAt.IsZero() && !all {
+					if !g.ArchivedAt.IsZero() && !archived {
 						continue
 					}
 					name := g.Name
@@ -59,19 +58,16 @@ func newGroupListCmd() *cobra.Command {
 						name = "  └ " + name // inside the group above
 					}
 					state := ""
-					switch {
-					case !g.ArchivedAt.IsZero():
+					if !g.ArchivedAt.IsZero() {
 						state = "archived"
-					case snap.ViewState.IsCollapsed(g.ID):
-						state = "collapsed"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", g.KindMark(), name, g.Color, counts[g.ID], tildeHome(g.Path), state)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", g.ID, g.KindMark(), name, g.Color, counts[g.ID], tildeHome(g.Path), state)
 				}
 				return tw.Flush()
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "include archived groups")
+	cmd.Flags().BoolVar(&archived, "archived", false, "include archived groups")
 	return cmd
 }
 
@@ -99,7 +95,7 @@ func nestedOrder(groups []*core.Group) []*core.Group {
 func newGroupNestCmd() *cobra.Command {
 	var top bool
 	cmd := &cobra.Command{
-		Use:   "nest <group> <parent>|--top",
+		Use:   "nest <group id> <parent id>|--top",
 		Short: "Put a group inside another (two levels deep), or with --top back at the top",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -128,7 +124,7 @@ func newGroupNestCmd() *cobra.Command {
 }
 
 func newGroupCreateCmd() *cobra.Command {
-	var color, folder, parentName string
+	var color, folder, parentID string
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a group, or with --folder a folder",
@@ -140,8 +136,8 @@ func newGroupCreateCmd() *cobra.Command {
 			}
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
 				parent := ""
-				if parentName != "" {
-					p, err := resolveGroup(snap, parentName)
+				if parentID != "" {
+					p, err := resolveGroup(snap, parentID)
 					if err != nil {
 						return err
 					}
@@ -152,9 +148,9 @@ func newGroupCreateCmd() *cobra.Command {
 					return err
 				}
 				if g.Path != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "Created folder %q (%s) at %s\n", g.Name, g.Color, tildeHome(g.Path))
+					fmt.Fprintf(cmd.OutOrStdout(), "Created folder %q (%s) at %s: %s\n", g.Name, g.Color, tildeHome(g.Path), g.ID)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "Created group %q (%s)\n", g.Name, g.Color)
+					fmt.Fprintf(cmd.OutOrStdout(), "Created group %q (%s): %s\n", g.Name, g.Color, g.ID)
 				}
 				return nil
 			})
@@ -162,14 +158,14 @@ func newGroupCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&color, "color", "", "a theme color (blue, magenta, cyan, yellow, green, red, bright-<one>), a fixed one (orange, teal, pink…), or #RRGGBB (default: the next theme color)")
 	cmd.Flags().StringVar(&folder, "folder", "", "make it a folder at this path, made if it's missing: new sessions in it start there")
-	cmd.Flags().StringVar(&parentName, "parent", "", "make it inside this group (two levels deep); it starts in the parent's color")
+	cmd.Flags().StringVar(&parentID, "parent", "", "make it inside this group, by id (two levels deep); it starts in the parent's color")
 	return cmd
 }
 
 func newGroupPathCmd() *cobra.Command {
 	var clearPath bool
 	cmd := &cobra.Command{
-		Use:   "path <group> <path>|--clear",
+		Use:   "path <group id> <path>|--clear",
 		Short: "Make a group a folder at a path (made if it's missing), or with --clear a group again",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -223,13 +219,13 @@ func groupMutation(use, short string, nargs int, build func(g *core.Group, args 
 }
 
 func newGroupRenameCmd() *cobra.Command {
-	return groupMutation("rename <group> <new name>", "Rename a group", 2, func(g *core.Group, a []string) ipc.Mutation {
+	return groupMutation("rename <group id> <new name>", "Rename a group", 2, func(g *core.Group, a []string) ipc.Mutation {
 		return ipc.Mutation{Kind: ipc.MutGroupRename, GroupID: g.ID, Text: a[1], Host: g.Host}
 	})
 }
 
 func newGroupColorCmd() *cobra.Command {
-	return groupMutation("color <group> <color>", "Change a group's color", 2, func(g *core.Group, a []string) ipc.Mutation {
+	return groupMutation("color <group id> <color>", "Change a group's color", 2, func(g *core.Group, a []string) ipc.Mutation {
 		return ipc.Mutation{Kind: ipc.MutGroupColor, GroupID: g.ID, Color: a[1], Host: g.Host}
 	})
 }
@@ -237,7 +233,7 @@ func newGroupColorCmd() *cobra.Command {
 func newGroupDeleteCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "delete <group>",
+		Use:   "delete <group id>",
 		Short: "Delete a group, and archive its sessions (move out any to keep first)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -263,7 +259,7 @@ func newGroupDeleteCmd() *cobra.Command {
 func newGroupArchiveCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "archive <group>",
+		Use:   "archive <group id>",
 		Short: "Archive a group and all its sessions",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -302,21 +298,19 @@ func newGroupUnarchiveCmd() *cobra.Command {
 	var sessions bool
 	var as string
 	cmd := &cobra.Command{
-		Use:   "unarchive <group>",
+		Use:   "unarchive <group id>",
 		Short: "Bring an archived group back",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				var g *core.Group
-				for _, x := range snap.Groups {
-					if !x.ArchivedAt.IsZero() && (x.ID == args[0] || strings.EqualFold(x.Name, args[0])) {
-						g = x
-					}
+				g, err := resolveGroup(snap, args[0])
+				if err != nil {
+					return err
 				}
-				if g == nil {
-					return fmt.Errorf("no archived group named %q", args[0])
+				if g.ArchivedAt.IsZero() {
+					return fmt.Errorf("%s isn't archived", g.Name)
 				}
-				err := c.mutate(ipc.Mutation{Kind: ipc.MutGroupUnarchive, GroupID: g.ID, Flag: sessions, Host: g.Host, Text: as}, nil)
+				err = c.mutate(ipc.Mutation{Kind: ipc.MutGroupUnarchive, GroupID: g.ID, Flag: sessions, Host: g.Host, Text: as}, nil)
 				if as == "" && hasCode(err, ipc.CodeConflict) {
 					for _, x := range snap.Groups {
 						if x.Host == g.Host && x.ArchivedAt.IsZero() && strings.EqualFold(x.Name, g.Name) {
@@ -331,63 +325,5 @@ func newGroupUnarchiveCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&sessions, "sessions", false, "also unarchive the group's sessions (as paused)")
 	cmd.Flags().StringVar(&as, "as", "", "bring it back under this name (when another group has taken its own)")
-	return cmd
-}
-
-func newGroupCollapseCmd(use string, collapsed bool) *cobra.Command {
-	var all bool
-	cmd := &cobra.Command{
-		Use:   use + " <group>|--all",
-		Short: map[bool]string{true: "Collapse a group (or all)", false: "Expand a group (or all)"}[collapsed],
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if all == (len(args) == 1) {
-				return errors.New("give a group name or --all")
-			}
-			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				m := ipc.Mutation{Kind: ipc.MutGroupCollapse, Flag: collapsed}
-				if !all {
-					g, err := resolveGroup(snap, args[0])
-					if err != nil {
-						return err
-					}
-					m.GroupID = g.ID // collapse is the view's, not the host's: no host
-				}
-				return c.mutate(m, nil)
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&all, "all", false, "all groups")
-	return cmd
-}
-
-func newViewModeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:       "view-mode groups|list",
-		Short:     "Switch acmd list between group view and list view",
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"groups", "list"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withClient(cmd.Context(), func(c *client, _ snapshot) error {
-				return c.mutate(ipc.Mutation{Kind: ipc.MutViewMode, Text: args[0]}, nil)
-			})
-		},
-	}
-}
-
-func newSortCmd() *cobra.Command {
-	var desc bool
-	cmd := &cobra.Command{
-		Use:       "sort created|name|activity|status|cwd",
-		Short:     "Set the sort order for acmd list",
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"created", "name", "activity", "status", "cwd"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withClient(cmd.Context(), func(c *client, _ snapshot) error {
-				return c.mutate(ipc.Mutation{Kind: ipc.MutViewSort, Text: args[0], Flag: desc}, nil)
-			})
-		},
-	}
-	cmd.Flags().BoolVar(&desc, "desc", false, "descending")
 	return cmd
 }

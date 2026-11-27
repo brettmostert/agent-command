@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -40,10 +39,9 @@ func (r Row) Title() string {
 	return r.Group.Name
 }
 
-// Layout orders and numbers sessions for display according to the shared
-// view state: list or group view, sort key and direction, filter, collapse
-// and focus. It's used by the sidebar and by `acmd list`/`go N`,
-// so numbers mean the same thing everywhere.
+// Layout orders and numbers sessions for display according to a client's
+// view: list or group view, sort key and direction, filter and collapse.
+// Numbers are the client's own shortcuts: commands take ids.
 func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 	byID := map[string]*Group{}
 	for _, g := range groups {
@@ -121,7 +119,7 @@ func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 		if f.active() && len(all) == 0 {
 			return // filtering hides groups without matches
 		}
-		collapsed := (g.Collapsed || vs.IsCollapsed(g.ID)) && !f.active() // matches expand while filtering
+		collapsed := vs.IsCollapsed(g.ID) && !f.active() // matches expand while filtering
 		rows = append(rows, Row{Group: g, Depth: depth, Count: len(all), Urgent: mostUrgent(all), Collapsed: collapsed})
 		if collapsed {
 			return // a collapsed parent hides its children too
@@ -321,51 +319,33 @@ func (f filter) match(s *Session, g *Group) bool {
 }
 
 // Selector errors.
-var (
-	ErrNoMatch   = errors.New("no session matches")
-	ErrAmbiguous = errors.New("more than one session matches")
-)
+var ErrNoMatch = errors.New("no session matches")
 
-// Resolve finds a session by a CLI selector: its number in the
-// current layout, its acmd id, its short background id, its Claude session
-// id, or a unique case-insensitive name prefix.
-func Resolve(rows []Row, all []*Session, sel string) (*Session, error) {
-	sel = strings.TrimSpace(sel)
-	if sel == "" {
+// Resolve finds a session by its acmd id or its Claude session id. Nothing
+// else picks a session: a name or a number can mean another one later.
+func Resolve(all []*Session, id string) (*Session, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
 		return nil, ErrNoMatch
 	}
-	if n, err := strconv.Atoi(sel); err == nil {
-		for _, r := range rows {
-			if r.Number == n && r.Session != nil {
-				return r.Session, nil
-			}
-		}
-		return nil, fmt.Errorf("%w: no session number %d in the current view", ErrNoMatch, n)
-	}
 	for _, s := range all {
-		if s.ID == sel || s.ClaudeSessionID == sel {
+		if s.ID == id || s.ClaudeSessionID == id {
 			return s, nil
 		}
 	}
-	lower := strings.ToLower(sel)
-	var matches []*Session
+	return nil, fmt.Errorf("%w %q: give its id (acmd find <name> finds it)", ErrNoMatch, id)
+}
+
+// Find is the sessions whose name has text in it, ignoring case.
+func Find(all []*Session, text string) []*Session {
+	text = strings.ToLower(strings.TrimSpace(text))
+	var out []*Session
 	for _, s := range all {
-		if strings.HasPrefix(strings.ToLower(s.Name), lower) {
-			matches = append(matches, s)
+		if text != "" && strings.Contains(strings.ToLower(s.Name), text) {
+			out = append(out, s)
 		}
 	}
-	switch len(matches) {
-	case 0:
-		return nil, fmt.Errorf("%w %q", ErrNoMatch, sel)
-	case 1:
-		return matches[0], nil
-	default:
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.Name
-		}
-		return nil, fmt.Errorf("%w %q: %s", ErrAmbiguous, sel, strings.Join(names, ", "))
-	}
+	return out
 }
 
 // NextAttention picks the session that most needs you, other than shown:

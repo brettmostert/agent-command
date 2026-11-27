@@ -100,7 +100,7 @@ func TestWakeOnAndOff(t *testing.T) {
 	if !strings.Contains(out, "can't wake the host yet") {
 		t.Errorf("hint: %q", out)
 	}
-	if out := mustRun(t, "schedule", "show", "Brief"); !strings.Contains(out, "Wakes the host") {
+	if out := mustRun(t, "schedule", "show", jobID(t, "Brief")); !strings.Contains(out, "Wakes the host") {
 		t.Errorf("show: %q", out)
 	}
 
@@ -126,7 +126,7 @@ func TestWakeOnAndOff(t *testing.T) {
 		t.Errorf("all kept: %q", out)
 	}
 	mustRun(t, "schedule", "wake", "on", "--all=false")
-	mustRun(t, "schedule", "edit", "Brief", "--wake=false")
+	mustRun(t, "schedule", "edit", jobID(t, "Brief"), "--wake=false")
 	if out := mustRun(t, "schedule", "wake", "status"); !strings.Contains(out, "No job wakes it yet") {
 		t.Errorf("none: %q", out)
 	}

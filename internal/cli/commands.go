@@ -27,8 +27,8 @@ import (
 // the app.
 
 type newOptions struct {
-	group       string
-	noCreate    bool
+	group       string // a group's id
+	newGroup    string // a group to make, by name
 	cwd         string
 	name        string
 	description string
@@ -80,7 +80,10 @@ func newNewCmd() *cobra.Command {
 			}
 			// With a group and no folder, a folder's path is where it starts;
 			// startOnHost falls back to the current folder for a group.
-			if o.cwd == "" && o.group == "" {
+			if o.group != "" && o.newGroup != "" {
+				return usageError{errors.New("give --group (a group's id) or --new-group (a name), not both")}
+			}
+			if o.cwd == "" && o.group == "" && o.newGroup == "" {
 				o.cwd = defaultCwd()
 			}
 			s, err := startSession(cmd.Context(), o)
@@ -92,8 +95,8 @@ func newNewCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.group, "group", "", "group to put it in (created if missing)")
-	f.BoolVar(&o.noCreate, "no-create", false, "fail instead of creating a missing --group")
+	f.StringVar(&o.group, "group", "", "the group to put it in, by id (acmd group find <name> finds it)")
+	f.StringVar(&o.newGroup, "new-group", "", "make a group with this name, and put it in")
 	f.StringVar(&o.cwd, "cwd", "", "folder to start in (default: the current folder)")
 	f.StringVar(&o.name, "name", "", "session name (default: the agent's)")
 	f.StringVar(&o.description, "description", "", "session description")
@@ -138,20 +141,15 @@ func startRemoteSession(cmd *cobra.Command, o newOptions, on remoteNewOptions) e
 				return err
 			}
 		}
-		if o.group != "" {
+		if o.group != "" || o.newGroup != "" {
 			snap, err := c.snapshot()
 			if err != nil {
 				return err
 			}
 			// The host's group: it keeps its own, and the session starts there.
-			g, err := liveGroupOn(snap, o.group, on.host)
-			if err != nil && (o.noCreate || errors.As(err, new(archivedGroupError))) {
-				return err
-			}
+			g, err := groupFor(c, snap, o.group, o.newGroup, on.host)
 			if err != nil {
-				if g, err = createGroupOn(c, o.group, "", on.host); err != nil {
-					return err
-				}
+				return err
 			}
 			req.GroupID = g.ID
 		}
@@ -212,17 +210,10 @@ func startOnHost(ctx context.Context, o newOptions, dir string) (*core.Session, 
 		if req.HarnessID, req.HarnessKind, err = pickHarness(harnessChoices(snap.Harnesses), o.harness); err != nil {
 			return err
 		}
-		if o.group != "" {
-			g, err := liveGroupOn(snap, o.group, "")
-			if err != nil && (o.noCreate || errors.As(err, new(archivedGroupError))) {
-				return err
-			}
+		if o.group != "" || o.newGroup != "" {
+			g, err := groupFor(c, snap, o.group, o.newGroup, "")
 			if err != nil {
-				var created ipc.Group
-				if err := c.mutate(ipc.Mutation{Kind: ipc.MutGroupCreate, Text: o.group}, &created); err != nil {
-					return err
-				}
-				g = created.Core(false)
+				return err
 			}
 			req.GroupID = g.ID
 			if req.Cwd == "" && !g.IsFolder() {
@@ -238,7 +229,7 @@ func startOnHost(ctx context.Context, o newOptions, dir string) (*core.Session, 
 func newResumeCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "resume <N|id|name-prefix> | --all",
+		Use:   "resume <id> | --all",
 		Short: "Resume stopped sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all == (len(args) == 1) || len(args) > 1 {
@@ -287,7 +278,7 @@ func newResumeCmd() *cobra.Command {
 func newOpenCmd() *cobra.Command {
 	var preset, target string
 	cmd := &cobra.Command{
-		Use:   "open <N|id|name-prefix>",
+		Use:   "open <id>",
 		Short: "Open a session's folder in your editor",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

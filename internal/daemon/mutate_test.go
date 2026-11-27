@@ -55,17 +55,12 @@ func TestMutations(t *testing.T) {
 		t.Error("missing session accepted")
 	}
 
-	// Groups, move, collapse, view state, focus.
+	// Groups and move. The view is each client's own: the daemon keeps none.
 	var g ipc.Group
 	must(t, c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "PROJ-1"}, &g))
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(bg.ID, ex.ID), GroupID: g.ID})
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupRename, GroupID: g.ID, Text: "PROJ-1 auth"})
 	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupColor, GroupID: g.ID, Color: "red"})
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCollapse, GroupID: g.ID, Flag: true})
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewMode, Text: "list"})
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewSort, Text: "status", Flag: true})
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewFilter, Text: "g:proj"})
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutViewArchived, Flag: true})
 	snap = snapshot(t, c)
 	var got *ipc.Group
 	for _, x := range snap.Groups {
@@ -73,19 +68,13 @@ func TestMutations(t *testing.T) {
 			got = x
 		}
 	}
-	if got.Name != "PROJ-1 auth" || got.Color != "red" || !snap.ViewState.IsCollapsed(got.ID) || byClaude(snap, "bg").GroupID != g.ID {
+	if got.Name != "PROJ-1 auth" || got.Color != "red" || byClaude(snap, "bg").GroupID != g.ID {
 		t.Errorf("group state: %+v", got)
 	}
-	vs := snap.ViewState
-	if vs.Mode != "list" || vs.Sort != "status" || !vs.Desc || vs.Filter != "g:proj" || !vs.ShowArchived {
-		t.Errorf("view state: %+v", vs)
-	}
-	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCollapse, Flag: false}) // all
-
 	for _, bad := range []ipc.Mutation{
-		{Kind: ipc.MutViewMode, Text: "tree"},
-		{Kind: ipc.MutViewSort, Text: "size"},
-		{Kind: "view.focus", GroupID: "nope"}, // focus is each client's own view
+		{Kind: "view.mode", Text: "list"}, {Kind: "view.sort", Text: "name"}, {Kind: "view.filter", Text: "x"},
+		{Kind: "view.archived", Flag: true}, {Kind: "group.collapse", GroupID: g.ID, Flag: true},
+		{Kind: "view.focus", GroupID: "nope"}, // the view is each client's own
 		{Kind: "nope"}} {
 		if err := c.Call(ipc.OpMutate, bad, nil); err == nil {
 			t.Errorf("%+v accepted", bad)

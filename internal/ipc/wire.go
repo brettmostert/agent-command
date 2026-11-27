@@ -1,7 +1,6 @@
 package ipc
 
 import (
-	"slices"
 	"time"
 
 	"github.com/brettmostert/agent-command/internal/core"
@@ -86,17 +85,6 @@ type Group struct {
 	Host string `json:"host,omitempty"`
 }
 
-// ViewState is how the list is shown.
-type ViewState struct {
-	Mode         string `json:"mode"` // "groups" | "list"
-	Sort         string `json:"sort"` // "created" | "name" | "activity" | "status" | "cwd"
-	Desc         bool   `json:"desc,omitempty"`
-	Filter       string `json:"filter,omitempty"`
-	ShowArchived bool   `json:"show_archived,omitempty"`
-	// Collapsed are the collapsed groups' ids.
-	Collapsed []string `json:"collapsed,omitempty"`
-}
-
 // SessionOf is s on the wire.
 func SessionOf(s *core.Session) *Session {
 	if s == nil {
@@ -164,22 +152,10 @@ func GroupsOf(gs []*core.Group) []*Group {
 	return out
 }
 
-// Core is the group as internal/core has it; collapsed comes from the view.
-func (g *Group) Core(collapsed bool) *core.Group {
+// Core is the group as internal/core has it.
+func (g *Group) Core() *core.Group {
 	return &core.Group{ID: g.ID, Host: g.Host, Name: g.Name, Color: g.Color, SortKey: g.Order, Path: g.Path, ParentID: g.Parent,
-		CreatedAt: g.CreatedAt, ArchivedAt: g.ArchivedAt, Collapsed: collapsed}
-}
-
-// ViewStateOf is v on the wire.
-func ViewStateOf(v core.ViewState) ViewState {
-	return ViewState{Mode: v.Mode, Sort: v.Sort, Desc: v.Desc, Filter: v.Filter,
-		ShowArchived: v.ShowArchived, Collapsed: v.Collapsed}
-}
-
-// Core is the view as internal/core has it.
-func (v ViewState) Core() core.ViewState {
-	return core.ViewState{Mode: v.Mode, Sort: v.Sort, Desc: v.Desc, Filter: v.Filter,
-		ShowArchived: v.ShowArchived, Collapsed: v.Collapsed}
+		CreatedAt: g.CreatedAt, ArchivedAt: g.ArchivedAt}
 }
 
 // CoreSessions are the snapshot's sessions as internal/core has them.
@@ -191,19 +167,11 @@ func (s Snapshot) CoreSessions() []*core.Session {
 	return out
 }
 
-// CoreGroups are the snapshot's groups as internal/core has them, collapsed
-// as the view says.
+// CoreGroups are the snapshot's groups as internal/core has them.
 func (s Snapshot) CoreGroups() []*core.Group {
-	collapsed := map[string]bool{}
-	for _, id := range s.ViewState.Collapsed {
-		collapsed[id] = true
-	}
 	out := make([]*core.Group, 0, len(s.Groups))
 	for _, g := range s.Groups {
-		out = append(out, g.Core(collapsed[g.ID]))
+		out = append(out, g.Core())
 	}
 	return out
 }
-
-// IsCollapsed says whether the group with id is collapsed.
-func (v ViewState) IsCollapsed(id string) bool { return slices.Contains(v.Collapsed, id) }

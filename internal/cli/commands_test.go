@@ -143,27 +143,33 @@ func mustRun(t *testing.T, args ...string) string {
 // jsonRow is what tests read of list --json: the daemon's sessions.
 type jsonRow = ipc.Session
 
-// numbered is the list as acmd list numbers it: each session's number (0 in
-// a collapsed group) and group.
-type numbered struct {
-	Number      int
-	Name, Group string
-}
+// inGroup is the list as acmd list lays it out: each session's name and
+// group.
+type inGroup struct{ Name, Group string }
 
-func listed(t *testing.T) []numbered {
+func listed(t *testing.T) []inGroup {
 	t.Helper()
-	var out []numbered
+	var out []inGroup
 	must(t, withClient(context.Background(), func(_ *client, snap snapshot) error {
-		for _, r := range filterRows(listRows(snap, snap.ViewState), snap, "", "") {
+		for _, r := range listRows(snap, core.ViewState{Mode: "groups", Sort: "created"}) {
 			group := ""
 			if r.Group != nil {
 				group = r.Group.Name
 			}
-			out = append(out, numbered{Number: r.Number, Name: r.Session.Name, Group: group})
+			out = append(out, inGroup{Name: r.Session.Name, Group: group})
 		}
 		return nil
 	}))
 	return out
+}
+
+// groupID is the id of this machine's group with name, as acmd group find
+// prints it.
+func groupID(t *testing.T, name string) string {
+	t.Helper()
+	var found []foundGroup
+	must(t, json.Unmarshal([]byte(mustRun(t, "group", "find", name, "--json")), &found))
+	return found[0].ID
 }
 
 func listJSON(t *testing.T, args ...string) []jsonRow {
@@ -186,14 +192,18 @@ func names(rows []jsonRow) string {
 func TestListCommand(t *testing.T) {
 	env(t)
 	out := mustRun(t, "list")
-	for _, want := range []string{"#", "STATUS", "WHERE", "refactor auth middleware", "busy", "waiting", "api-server", "acmd"} {
+	for _, want := range []string{"ID", "STATUS", "WHERE", "refactor auth middleware", "busy", "waiting", "api-server", "acmd"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output missing %q:\n%s", want, out)
 		}
 	}
 	rows := listJSON(t)
-	if names(rows) != "refactor auth middleware | fix flaky e2e test | docs: hooks reference" || listed(t)[0].Number != 1 {
+	if names(rows) != "refactor auth middleware | fix flaky e2e test | docs: hooks reference" {
 		t.Errorf("default order: %s", names(rows))
+	}
+	// Each line starts with the id commands take.
+	if lines := strings.Split(out, "\n"); !strings.HasPrefix(lines[1], rows[0].ID+" ") {
+		t.Errorf("the id isn't first:\n%s", out)
 	}
 	if rows[1].Status != "waiting" || !rows[1].Unseen {
 		t.Errorf("rows: %+v", rows)
@@ -210,28 +220,99 @@ func TestListCommand(t *testing.T) {
 	if got := names(listJSON(t, "--filter", "flaky")); got != "fix flaky e2e test" {
 		t.Errorf("--filter: %s", got)
 	}
-	if got := listJSON(t, "--group", "nope"); len(got) != 0 {
-		t.Errorf("--group unknown: %v", got)
+	if _, err := acmd(t, "list", "--group", "nope"); err == nil || !strings.Contains(err.Error(), "acmd group find") {
+		t.Errorf("--group unknown: %v", err)
+	}
+	for _, bad := range [][]string{{"--sort", "bogus"}, {"--mode", "tree"}} {
+		if _, err := acmd(t, append([]string{"list"}, bad...)...); ExitCode(err) != exitUsage {
+			t.Errorf("list %v: %v", bad, err)
+		}
+	}
+}
+
+// The view is the command's own, each time: nothing a list was given stays.
+func TestListKeepsNoView(t *testing.T) {
+	env(t)
+	mustRun(t, "move", "c-auth", "--new-group", "api")
+	if got := names(listJSON(t, "--mode", "list", "--sort", "name", "--desc")); !strings.HasPrefix(got, "refactor") {
+		t.Errorf("list, by name, descending: %s", got)
+	}
+	if got := names(listJSON(t)); got != "refactor auth middleware | fix flaky e2e test | docs: hooks reference" {
+		t.Errorf("the flags stayed: %s", got)
+	}
+	if out := mustRun(t, "list", "--mode", "list"); strings.Contains(out, "No group") {
+		t.Errorf("list mode has no headers:\n%s", out)
+	}
+	for _, gone := range [][]string{{"view-mode", "list"}, {"sort", "name"}} {
+		if _, err := acmd(t, gone...); err == nil {
+			t.Errorf("acmd %v still runs", gone)
+		}
+	}
+	for _, gone := range []string{"collapse", "expand"} {
+		if _, err := acmd(t, "group", gone, "api"); ExitCode(err) != exitUsage || !strings.Contains(err.Error(), `unknown command "`+gone+`"`) {
+			t.Errorf("acmd group %s: %v", gone, err)
+		}
+	}
+	if out := mustRun(t, "group"); !strings.Contains(out, "Available Commands") {
+		t.Errorf("acmd group on its own:\n%s", out)
 	}
 }
 
 func TestRenameDescribeAndSelectors(t *testing.T) {
 	env(t)
-	mustRun(t, "rename", "2", "flaky", "e2e", "(PROJ-9)")
-	mustRun(t, "describe", "refactor", "PROJ-123 follow-up")
+	mustRun(t, "rename", "c-flaky", "flaky", "e2e", "(PROJ-9)")
 	rows := listJSON(t)
+	mustRun(t, "describe", rows[0].ID, "PROJ-123 follow-up")
+	rows = listJSON(t)
 	if rows[1].Name != "flaky e2e (PROJ-9)" || rows[0].Description != "PROJ-123 follow-up" {
 		t.Errorf("rows: %+v", rows)
 	}
-	if _, err := acmd(t, "rename", "zzz", "x"); err == nil || !strings.Contains(err.Error(), "no session matches") {
-		t.Errorf("unknown selector: %v", err)
+	// Only an id picks a session: never a number, a name or a prefix of one.
+	for _, sel := range []string{"zzz", "1", "2", "refactor", "flaky e2e (PROJ-9)", rows[0].ID[:8]} {
+		if _, err := acmd(t, "rename", sel, "x"); err == nil || !strings.Contains(err.Error(), "no session matches") ||
+			!strings.Contains(err.Error(), "acmd find") || ExitCode(err) != exitFailed {
+			t.Errorf("rename %q: %v", sel, err)
+		}
 	}
-	mustRun(t, "rename", "1", "fix one")
-	if _, err := acmd(t, "rename", "f", "x"); err == nil || !strings.Contains(err.Error(), "more than one") {
-		t.Errorf("ambiguous prefix: %v", err)
-	}
-	if _, err := acmd(t, "rename", "1", "   "); err == nil {
+	if _, err := acmd(t, "rename", rows[0].ID, "   "); err == nil {
 		t.Error("empty name should fail")
+	}
+}
+
+// acmd find turns a name into ids: every match, one per line.
+func TestFind(t *testing.T) {
+	env(t)
+	rows := listJSON(t)
+	if out := mustRun(t, "find", "FLAKY"); out != rows[1].ID+"\n" {
+		t.Errorf("find FLAKY = %q", out)
+	}
+	// Several: all of them, and it fails.
+	out, err := acmd(t, "find", "e")
+	if err == nil || !strings.Contains(err.Error(), "3 sessions match") || ExitCode(err) != exitFailed {
+		t.Errorf("find e: %v", err)
+	}
+	if out != rows[0].ID+"\n"+rows[1].ID+"\n"+rows[2].ID+"\n" {
+		t.Errorf("find e printed %q", out)
+	}
+	if out, err := acmd(t, "find", "nothing like it"); err == nil || out != "" || ExitCode(err) != exitFailed {
+		t.Errorf("no match: %q %v", out, err)
+	}
+
+	mustRun(t, "move", "c-auth", "--new-group", "api")
+	var found []foundSession
+	must(t, json.Unmarshal([]byte(mustRun(t, "find", "auth", "--json")), &found))
+	if len(found) != 1 || found[0].ID != rows[0].ID || found[0].Name != "refactor auth middleware" || found[0].Status != core.StatusBusy ||
+		found[0].Group != groupID(t, "api") || found[0].Host != "" {
+		t.Errorf("find --json: %+v", found)
+	}
+	out, err = acmd(t, "find", "zzz", "--json")
+	if err == nil || strings.TrimSpace(out) != "[]" {
+		t.Errorf("find --json, none: %q %v", out, err)
+	}
+	// The id it prints is one commands take.
+	mustRun(t, "rename", strings.TrimSpace(mustRun(t, "find", "docs")), "docs v2")
+	if got := names(listJSON(t)); !strings.HasSuffix(got, "docs v2") {
+		t.Errorf("rename by a found id: %s", got)
 	}
 }
 
@@ -239,17 +320,17 @@ func TestRenameDescribeAndSelectors(t *testing.T) {
 // archived together.
 func TestRenameAndArchiveSeveral(t *testing.T) {
 	env(t)
-	mustRun(t, "rename", "1", "2", "--to", "api")
+	mustRun(t, "rename", "c-auth", "c-flaky", "--to", "api")
 	rows := listJSON(t)
 	names := []string{rows[0].Name, rows[1].Name}
 	if strings.Join(names, ",") != "api - 1,api - 2" {
 		t.Errorf("names = %v", names)
 	}
-	if _, err := acmd(t, "rename", "1"); err == nil {
+	if _, err := acmd(t, "rename", "c-auth"); err == nil {
 		t.Error("a rename with no name")
 	}
 	before := len(listJSON(t))
-	mustRun(t, "archive", "1", "2", "--yes")
+	mustRun(t, "archive", rows[0].ID, rows[1].ID, "--yes")
 	if after := len(listJSON(t)); after != before-2 {
 		t.Errorf("archived %d", before-after)
 	}
@@ -260,85 +341,101 @@ func TestRenameAndArchiveSeveral(t *testing.T) {
 	}
 }
 
-func TestGroupsMoveViewAndFocus(t *testing.T) {
+func TestGroupsAndMove(t *testing.T) {
 	env(t)
-	if out := mustRun(t, "group", "create", "PROJ-123 auth"); !strings.Contains(out, `Created group "PROJ-123 auth" (blue)`) {
+	out := mustRun(t, "group", "create", "PROJ-123 auth")
+	auth := groupID(t, "proj-123")
+	if !strings.Contains(out, `Created group "PROJ-123 auth" (blue): `+auth) {
 		t.Errorf("create: %s", out)
 	}
 	if _, err := acmd(t, "group", "create", "proj-123 AUTH"); err == nil {
 		t.Error("duplicate group should fail")
 	}
-	mustRun(t, "move", "1", "2", "proj-123 auth")
-	if _, err := acmd(t, "move", "3", "billing"); err == nil || !strings.Contains(err.Error(), "--create") {
-		t.Errorf("move to missing group: %v", err)
+	mustRun(t, "move", "c-auth", "c-flaky", auth)
+	// A group's name isn't its id: nothing is made, and nothing moves.
+	if _, err := acmd(t, "move", "c-docs", "billing"); err == nil || !strings.Contains(err.Error(), "acmd group find") {
+		t.Errorf("move to a name: %v", err)
 	}
-	mustRun(t, "move", "3", "billing", "--create")
+	if _, err := acmd(t, "move", "c-docs", "PROJ-123 auth"); err == nil {
+		t.Error("moved into a group by its name")
+	}
+	if _, err := acmd(t, "move", "c-docs", "--new-group", "x", "--no-group"); ExitCode(err) != exitUsage {
+		t.Errorf("--new-group and --no-group: %v", err)
+	}
+	if _, err := acmd(t, "move", "c-docs"); ExitCode(err) != exitUsage {
+		t.Errorf("move with no group: %v", err)
+	}
+	mustRun(t, "move", "c-docs", "--new-group", "billing")
+	billing := groupID(t, "billing")
 
 	rows := listed(t)
 	if rows[0].Group != "PROJ-123 auth" || rows[2].Group != "billing" {
 		t.Errorf("groups: %+v", rows)
 	}
-	out := mustRun(t, "group", "list")
-	if !strings.Contains(out, "PROJ-123 auth") || !strings.Contains(out, "billing") || strings.Contains(out, "Default") {
-		t.Errorf("group list (no Default):\n%s", out)
+	out = mustRun(t, "group", "list")
+	if !strings.Contains(out, "PROJ-123 auth") || !strings.Contains(out, "billing") || strings.Contains(out, "Default") ||
+		!strings.Contains(out, auth+"  ") || strings.Contains(out, "collapsed") {
+		t.Errorf("group list:\n%s", out)
 	}
-	mustRun(t, "group", "rename", "billing", "billing v2")
-	mustRun(t, "group", "color", "billing v2", "green")
+	for _, args := range [][]string{{"group", "rename", "billing", "x"}, {"group", "color", "billing", "green"}, {"group", "delete", "billing", "--yes"}} {
+		if _, err := acmd(t, args...); err == nil || !strings.Contains(err.Error(), "acmd group find") {
+			t.Errorf("acmd %v by name: %v", args, err)
+		}
+	}
+	mustRun(t, "group", "rename", billing, "billing v2")
+	mustRun(t, "group", "color", billing, "green")
 	if out := mustRun(t, "group", "list"); !strings.Contains(out, "billing v2") || !strings.Contains(out, "green") {
 		t.Errorf("rename/color:\n%s", out)
 	}
-
-	// Collapsed groups: sessions still listed, but unnumbered.
-	mustRun(t, "group", "collapse", "PROJ-123 auth")
-	rows = listed(t)
-	if rows[0].Number != 0 || rows[2].Number != 1 {
-		t.Errorf("collapsed numbering: %+v", rows)
-	}
-	mustRun(t, "group", "expand", "--all")
-	if _, err := acmd(t, "group", "collapse"); err == nil {
-		t.Error("collapse needs a group or --all")
+	if got := names(listJSON(t, "--group", billing)); got != "docs: hooks reference" {
+		t.Errorf("--group: %s", got)
 	}
 
-	mustRun(t, "view-mode", "list")
-	mustRun(t, "sort", "name", "--desc")
-	if got := names(listJSON(t)); !strings.HasPrefix(got, "refactor") {
-		t.Errorf("persisted sort: %s", got)
-	}
-	if _, err := acmd(t, "sort", "bogus"); err == nil {
-		t.Error("bad sort key should fail")
-	}
-	if _, err := acmd(t, "view-mode", "tree"); err == nil {
-		t.Error("bad view mode should fail")
-	}
-
-	// Deleting a group moves its sessions to Default.
-	if _, err := acmd(t, "group", "delete", "billing v2"); err == nil || !strings.Contains(err.Error(), "--yes") {
+	// Deleting a group archives its sessions.
+	if _, err := acmd(t, "group", "delete", billing); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Errorf("delete without confirmation: %v", err)
 	}
-	mustRun(t, "group", "delete", "billing v2", "--yes")
-	for _, r := range listed(t) {
-		if r.Name == "docs: hooks reference" && r.Group != "Default" {
-			t.Errorf("after delete: %+v", r)
-		}
+	mustRun(t, "group", "delete", billing, "--yes")
+	if got := names(listJSON(t)); strings.Contains(got, "docs") {
+		t.Errorf("after delete: %s", got)
 	}
-	if _, err := acmd(t, "group", "delete", "default", "--yes"); err == nil {
-		t.Error("deleting Default should fail")
+}
+
+// acmd group find: every group whose name has the text, archived ones too.
+func TestGroupFind(t *testing.T) {
+	env(t)
+	mustRun(t, "group", "create", "api")
+	mustRun(t, "group", "create", "web api")
+	mustRun(t, "group", "create", "docs")
+	api, docs := groupID(t, "web"), groupID(t, "docs")
+	out, err := acmd(t, "group", "find", "API")
+	if err == nil || !strings.Contains(err.Error(), "2 groups match") || strings.Count(out, "\n") != 2 || !strings.Contains(out, api) {
+		t.Errorf("find API: %q %v", out, err)
+	}
+	mustRun(t, "group", "archive", docs, "--yes")
+	var found []foundGroup
+	must(t, json.Unmarshal([]byte(mustRun(t, "group", "find", "doc", "--json")), &found))
+	if len(found) != 1 || found[0].ID != docs || !found[0].Archived {
+		t.Errorf("an archived group: %+v", found)
+	}
+	if out, err := acmd(t, "group", "find", "zzz", "--json"); err == nil || strings.TrimSpace(out) != "[]" {
+		t.Errorf("none: %q %v", out, err)
 	}
 }
 
 func TestArchive(t *testing.T) {
 	env(t)
-	if _, err := acmd(t, "archive", "1"); err == nil || !strings.Contains(err.Error(), "--yes") {
+	if _, err := acmd(t, "archive", "c-auth"); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Errorf("archive without confirmation: %v", err)
 	}
-	mustRun(t, "archive", "docs", "--yes")
+	mustRun(t, "archive", "c-docs", "--yes")
 	if got := names(listJSON(t)); strings.Contains(got, "docs") {
 		t.Errorf("archived still listed: %s", got)
 	}
-	if got := names(listJSON(t, "--all")); !strings.Contains(got, "docs") {
-		t.Errorf("--all should show archived: %s", got)
+	if got := names(listJSON(t, "--archived")); !strings.Contains(got, "docs") {
+		t.Errorf("--archived should show archived: %s", got)
 	}
-	mustRun(t, "unarchive", "docs")
+	mustRun(t, "unarchive", "c-docs")
 	for _, r := range listJSON(t) {
 		if r.Name == "docs: hooks reference" && r.Status != core.StatusPaused {
 			t.Errorf("unarchived status: %s", r.Status)
@@ -346,20 +443,28 @@ func TestArchive(t *testing.T) {
 	}
 
 	// Group archive archives its sessions.
-	mustRun(t, "move", "refactor", "fix", "PROJ-1", "--create")
-	mustRun(t, "group", "archive", "PROJ-1", "--yes")
+	mustRun(t, "move", "c-auth", "c-flaky", "--new-group", "PROJ-1")
+	proj := groupID(t, "PROJ-1")
+	mustRun(t, "group", "archive", proj, "--yes")
 	if got := names(listJSON(t)); got != "docs: hooks reference" {
 		t.Errorf("after group archive: %s", got)
 	}
-	if _, err := acmd(t, "group", "archive", "default", "--yes"); err == nil {
-		t.Error("archiving Default should fail")
+	if out := mustRun(t, "group", "list", "--archived"); !strings.Contains(out, "archived") {
+		t.Errorf("group list --archived:\n%s", out)
 	}
-	mustRun(t, "group", "unarchive", "PROJ-1", "--sessions")
+	// Nothing goes into an archived group.
+	if _, err := acmd(t, "move", "c-docs", proj); err == nil || !strings.Contains(err.Error(), "unarchive it first (acmd group unarchive "+proj+")") {
+		t.Errorf("move into an archived group: %v", err)
+	}
+	if _, err := acmd(t, "group", "unarchive", "PROJ-1"); err == nil {
+		t.Error("unarchived a group by its name")
+	}
+	mustRun(t, "group", "unarchive", proj, "--sessions")
 	if got := len(listJSON(t)); got != 3 {
 		t.Errorf("after group unarchive --sessions: %d sessions", got)
 	}
-	if _, err := acmd(t, "group", "unarchive", "nope"); err == nil {
-		t.Error("unarchive of a missing group should fail")
+	if _, err := acmd(t, "group", "unarchive", proj); err == nil || !strings.Contains(err.Error(), "isn't archived") {
+		t.Errorf("unarchive of a live group: %v", err)
 	}
 }
 
@@ -398,7 +503,7 @@ func TestPurge(t *testing.T) {
 	if out := mustRun(t, "purge", "--yes"); !strings.Contains(out, "No archived sessions to purge.") {
 		t.Errorf("nothing archived:\n%s", out)
 	}
-	mustRun(t, "archive", "docs", "--yes")
+	mustRun(t, "archive", "c-docs", "--yes")
 	if out := mustRun(t, "purge", "--older-than", "30d", "--yes"); !strings.Contains(out, "No archived sessions") {
 		t.Errorf("recently archived purged:\n%s", out)
 	}
@@ -408,7 +513,7 @@ func TestPurge(t *testing.T) {
 	if out := mustRun(t, "purge", "--yes"); !strings.Contains(out, "Purged 1 session(s).") {
 		t.Errorf("purge:\n%s", out)
 	}
-	if rows := listJSON(t, "--all"); len(rows) != 2 {
+	if rows := listJSON(t, "--archived"); len(rows) != 2 {
 		t.Errorf("%d sessions left", len(rows))
 	}
 	for _, bad := range []string{"x", "-1d", "-5h"} {
@@ -427,10 +532,10 @@ func TestScreenCommand(t *testing.T) {
 		t.Errorf("unknown: %v", err)
 	}
 	// The test sessions have no terminal running: it says so, rather than printing nothing.
-	if _, err := acmd(t, "screen", "1", "--lines", "5"); err == nil || !strings.Contains(err.Error(), "isn't running") {
+	if _, err := acmd(t, "screen", "c-auth", "--lines", "5"); err == nil || !strings.Contains(err.Error(), "isn't running") {
 		t.Errorf("no terminal: %v", err)
 	}
-	if _, err := acmd(t, "screen", "1", "--json"); err == nil {
+	if _, err := acmd(t, "screen", "c-auth", "--json"); err == nil {
 		t.Error("json for no terminal")
 	}
 }

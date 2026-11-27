@@ -24,12 +24,12 @@ var sessionRunning = term.Running
 
 func newAttachCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "attach <#|id|name>",
+		Use:   "attach <id>",
 		Short: "Attach this terminal to a session, here or on a host (Ctrl+] detaches)",
-		Long: "Attaches this terminal to a session until Ctrl+] detaches. The session is its number in acmd list, its\n" +
-			"id or its name: one here, or a host's, as its sessions show here. With --host, it's one of that host's\n" +
-			"sessions, as the host numbers them. With --json, it prints the session once detached.",
-		Example: "  acmd attach 2\n  acmd attach api\n  acmd attach --host studio docs",
+		Long: "Attaches this terminal to a session until Ctrl+] detaches. The session is its id (or its Claude\n" +
+			"session id): one here, or a host's, as its sessions show here. With --host, it's one of that host's\n" +
+			"sessions. acmd find <name> prints a session's id. With --json, it prints the session once detached.",
+		Example: "  acmd attach 01KB2Y6F3V0R8M5N7QWXJ4ZC1D\n  acmd attach $(acmd find api)",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stdinTerminal(cmd) {

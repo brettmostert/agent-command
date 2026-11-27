@@ -302,13 +302,6 @@ func (s *Store) applyUpsert(ev ipc.Event) (bool, error) {
 			s.snap.Notices = s.snap.Notices[len(s.snap.Notices)-100:]
 		}
 		return true, nil
-	case ipc.EntityView:
-		var vs ipc.ViewState
-		if err := json.Unmarshal(ev.Data, &vs); err != nil {
-			return false, fmt.Errorf("decode view: %w", err)
-		}
-		s.snap.ViewState = vs
-		return true, nil
 	case ipc.EntitySettings:
 		var m map[string]any
 		if err := json.Unmarshal(ev.Data, &m); err != nil {

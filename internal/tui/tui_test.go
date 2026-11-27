@@ -5,6 +5,9 @@ import (
 	"errors"
 	"go/build"
 	"io"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -55,7 +58,7 @@ func sampleSnapshot() ipc.Snapshot {
 		{ID: "r1", Name: "docs", Kind: core.KindHosted, Host: "studio", Status: core.StatusDone, GroupID: "g1", CreatedAt: t0},
 	}
 	groups := []*core.Group{
-		{ID: "g1", Name: "Writing", Host: "studio", SortKey: 1, Collapsed: true},
+		{ID: "g1", Name: "Writing", Host: "studio", SortKey: 1},
 	}
 	return ipc.Snapshot{
 		Sessions: ipc.SessionsOf(sessions), Groups: ipc.GroupsOf(groups),
@@ -81,10 +84,16 @@ type harness struct {
 
 func newHarness(t *testing.T, snap ipc.Snapshot) *harness {
 	t.Helper()
+	return newHarnessWith(t, snap, "")
+}
+
+// newHarnessWith is newHarness with the view kept in viewFile.
+func newHarnessWith(t *testing.T, snap ipc.Snapshot, viewFile string) *harness {
+	t.Helper()
 	d := &fakeDaemon{snap: snap}
 	at := time.Date(2026, 11, 23, 9, 41, 0, 0, time.Local)
 	h := &harness{t: t, d: d}
-	h.m = New(Options{Daemon: d, Me: "terminal-me", Now: func() time.Time { return at },
+	h.m = New(Options{Daemon: d, Me: "terminal-me", Now: func() time.Time { return at }, ViewFile: viewFile,
 		Attach: func(s ipc.Session) tea.ExecCommand { return fakeExec{id: s.ID} }})
 	h.m.exec = func(c tea.ExecCommand, _ tea.ExecCallback) tea.Cmd {
 		h.execs = append(h.execs, c)
@@ -189,7 +198,7 @@ func TestDrawsTheSessionsHereThenEachHost(t *testing.T) {
 		"acmd · 3 sessions · 2 need you",
 		"This machine", "    api", "busy",
 		"    web", "waiting   permission: Bash: make test (1 Yes · 2 Yes, and don't ask again · 3 No)",
-		"studio", "  ● Writing (1)", "    docs", "done: Docs are done.",
+		"studio", "  ▾ ● Writing (1)", "    docs", "done: Docs are done.",
 		keysHelp,
 	} {
 		if !strings.Contains(s, want) {
@@ -217,7 +226,11 @@ func TestMovesAndAttaches(t *testing.T) {
 	if !strings.Contains(h.selectedLine(), "web") {
 		t.Errorf("down: %q", h.selectedLine())
 	}
-	h.key("j") // past a section and a group header
+	h.key("j") // past a section, to a group's header
+	if !strings.Contains(h.selectedLine(), "Writing") {
+		t.Errorf("j: %q", h.selectedLine())
+	}
+	h.key("j")
 	if !strings.Contains(h.selectedLine(), "docs") {
 		t.Errorf("j: %q", h.selectedLine())
 	}
@@ -263,7 +276,7 @@ func TestAnswersAPromptAndRepliesToAFinishedTurn(t *testing.T) {
 		t.Errorf("after answering:\n%s", h.screen())
 	}
 
-	h.key("j", "a", "o", "k", "!", "backspace", "enter")
+	h.key("j", "j", "a", "o", "k", "!", "backspace", "enter")
 	if c := h.d.called(); len(c) != 2 || c[1] != `inbox.answer {"host":"studio","id":14,"text":"ok"}` {
 		t.Errorf("reply: %v", c)
 	}
@@ -427,5 +440,87 @@ func TestImportsNothingOfTheDaemons(t *testing.T) {
 		if strings.HasPrefix(imp, "github.com/brettmostert/agent-command/") && !slices.Contains(allowed, imp) {
 			t.Errorf("internal/tui imports %s: it may use only the wire (%v)", imp, allowed)
 		}
+	}
+}
+
+// The terminal UI keeps its own view: the daemon is never told of it, and
+// the view file has it the next time.
+func TestKeepsItsOwnViewInItsFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "acmd", "tui-view.json")
+	snap := sampleSnapshot()
+	h := newHarnessWith(t, snap, file)
+
+	// Collapse the host's group from its session: the cursor goes to the header.
+	h.key("j", "j", "j", "left")
+	if l := h.selectedLine(); !strings.Contains(l, "▸ ● Writing (1)") {
+		t.Errorf("left on docs: %q", l)
+	}
+	if s := h.screen(); strings.Contains(s, "    docs") || !strings.Contains(s, "acmd · 3 sessions · 2 need you") {
+		t.Errorf("a collapsed group shows its sessions, or isn't counted:\n%s", s)
+	}
+	h.key("enter") // a group's header: enter opens it, and attaches nothing
+	if strings.Contains(h.selectedLine(), "▸") || len(h.execs) != 0 || !strings.Contains(h.screen(), "    docs") {
+		t.Errorf("enter on a collapsed header: %q %v", h.selectedLine(), h.execs)
+	}
+	h.key("space")
+	if !strings.Contains(h.selectedLine(), "▸") {
+		t.Errorf("space didn't collapse it: %q", h.selectedLine())
+	}
+
+	h.key("s", "s", "S") // created → name → activity, descending
+	if !strings.Contains(h.screen(), "· by activity ↓") {
+		t.Errorf("sort:\n%s", h.screen())
+	}
+	h.key("v")
+	s := h.screen()
+	if !strings.Contains(s, "· list") || strings.Contains(s, "Writing") || !strings.Contains(s, "    docs") {
+		t.Errorf("list view:\n%s", s)
+	}
+	h.key("A")
+	if !strings.Contains(h.screen(), "archived shown") {
+		t.Errorf("archived:\n%s", h.screen())
+	}
+	if c := h.d.called(); len(c) != 0 {
+		t.Errorf("the view went to the daemon: %v", c)
+	}
+
+	want := View{Mode: "list", Sort: "activity", Desc: true, Archived: true, Collapsed: map[string][]string{"studio": {"g1"}}}
+	if got := LoadView(file); !reflect.DeepEqual(got, want) {
+		t.Errorf("view file: %+v, want %+v", got, want)
+	}
+	again := newHarnessWith(t, snap, file)
+	if !strings.Contains(again.screen(), "· list · by activity ↓ · archived shown") {
+		t.Errorf("the view isn't kept:\n%s", again.screen())
+	}
+	again.key("v")
+	if !strings.Contains(again.screen(), "▸ ● Writing (1)") {
+		t.Errorf("the collapse isn't kept:\n%s", again.screen())
+	}
+}
+
+func TestViewFileThatCantBeReadIsTheDefault(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "tui-view.json")
+	if err := os.WriteFile(file, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v := LoadView(file); !reflect.DeepEqual(v, View{}) || v.mode() != "groups" || v.sort() != "created" {
+		t.Errorf("a bad file: %+v", v)
+	}
+	if v := (View{Sort: "nope"}); v.sort() != "created" || v.nextSort() != "name" {
+		t.Errorf("an unknown sort: %q %q", v.sort(), v.nextSort())
+	}
+	if v := LoadView(""); !reflect.DeepEqual(v, View{}) || SaveView("", v) != nil {
+		t.Error("no file: the view is kept only while it runs")
+	}
+	// A view that can't be saved says so, and still changes.
+	h := newHarnessWith(t, sampleSnapshot(), filepath.Join(file, "under-a-file.json"))
+	h.key("v")
+	if s := h.screen(); !strings.Contains(s, "✗ the view isn't saved") || !strings.Contains(s, "· list") {
+		t.Errorf("a failed save:\n%s", s)
+	}
+	// In the list there are no groups to fold.
+	h.key("left")
+	if h.m.view.Collapsed != nil {
+		t.Errorf("folded in the list: %+v", h.m.view.Collapsed)
 	}
 }

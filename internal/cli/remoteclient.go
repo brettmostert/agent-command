@@ -385,7 +385,7 @@ func newRemoteBrowseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "browse <host>",
 		Short:             "List a Remote host's sessions, as its tree shows here",
-		Long:              "Lists the sessions a Remote host has, the most recently active first. Attach to one with acmd remote attach <host> <#|id|name>.",
+		Long:              "Lists the sessions a Remote host has, the most recently active first. Attach to one with acmd remote attach <host> <id>.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeHosts,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -413,14 +413,14 @@ func writeBrowse(w io.Writer, host string, list []*core.Session) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "#\tSTATUS\tNAME\tHARNESS\tDIR\tLAST\tID")
-	for i, s := range list {
+	fmt.Fprintln(tw, "ID\tSTATUS\tNAME\tHARNESS\tDIR\tLAST")
+	for _, s := range list {
 		status := string(s.Status)
 		if s.Unseen {
 			status += "•"
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", i+1, status, display(s.Name, 40), s.HarnessKind, filepath.Base(s.Cwd),
-			ago(cmpTime(s.LastEventAt, s.CreatedAt)), s.ID)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, status, display(s.Name, 40), s.HarnessKind, filepath.Base(s.Cwd),
+			ago(cmpTime(s.LastEventAt, s.CreatedAt)))
 	}
 	return tw.Flush()
 }
@@ -437,51 +437,16 @@ func ago(t time.Time) string {
 	return age(&core.Session{LastEventAt: t})
 }
 
-// resolveRemoteSession finds one of a host's sessions by its id, its number
-// in acmd remote browse (# optional), its name, or a unique prefix of its
-// name or id.
-func resolveRemoteSession(host string, list []*core.Session, sel string) (*core.Session, error) {
-	sel = strings.TrimSpace(sel)
-	notFound := fmt.Errorf("%s has no session %q (see acmd remote browse %s)", host, sel, host)
-	if sel == "" {
-		return nil, notFound
-	}
+// resolveRemoteSession finds one of a host's sessions by its id: never its
+// name, or its place in a list.
+func resolveRemoteSession(host string, list []*core.Session, id string) (*core.Session, error) {
+	id = strings.TrimSpace(id)
 	for _, s := range list {
-		if s.ID == sel {
+		if id != "" && s.ID == id {
 			return s, nil
 		}
 	}
-	if n, err := strconv.Atoi(strings.TrimPrefix(sel, "#")); err == nil {
-		if n < 1 || n > len(list) {
-			return nil, fmt.Errorf("%s has no session number %d (see acmd remote browse %s)", host, n, host)
-		}
-		return list[n-1], nil
-	}
-	var exact, prefix []*core.Session
-	lower := strings.ToLower(sel)
-	for _, s := range list {
-		name := strings.ToLower(s.Name)
-		switch {
-		case name == lower:
-			exact = append(exact, s)
-		case strings.HasPrefix(name, lower) || strings.HasPrefix(s.ID, sel):
-			prefix = append(prefix, s)
-		}
-	}
-	for _, m := range [][]*core.Session{exact, prefix} {
-		switch len(m) {
-		case 0:
-			continue
-		case 1:
-			return m[0], nil
-		}
-		names := make([]string, len(m))
-		for i, s := range m {
-			names[i] = fmt.Sprintf("%s (%s)", cmpOr(s.Name, "(unnamed)"), s.ID)
-		}
-		return nil, fmt.Errorf("%q matches more than one session on %s: %s", sel, host, strings.Join(names, ", "))
-	}
-	return nil, notFound
+	return nil, fmt.Errorf("%s has no session %q: give its id (see acmd remote browse %s)", host, id, host)
 }
 
 // findRemoteSession resolves sel among host's sessions.
@@ -527,11 +492,11 @@ func sessionWhat(host string, s *core.Session) string {
 
 func newRemoteAttachCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "attach <host> <#|id|name>",
+		Use:     "attach <host> <id>",
 		Aliases: []string{"open"},
 		Short:   "Attach this terminal to one of a Remote host's sessions",
 		Long: "Attaches this terminal to one of a Remote host's sessions, through this machine's daemon: Ctrl+]\n" +
-			"detaches. The session is its number in acmd remote browse, its id, or its name. A host's sessions\n" +
+			"detaches. The session is its id, as acmd remote browse shows it. A host's sessions\n" +
 			"show here, and in the app, as the host has them.",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeHostSessions,
@@ -616,8 +581,7 @@ func runningDaemon(parent context.Context) (*ipc.Conn, context.CancelFunc, error
 	return conn, func() { _ = conn.Close(); cancel() }, nil
 }
 
-// hostSessionNames are host's sessions, by name (or id, for unnamed ones),
-// each described by the other.
+// hostSessionNames are host's sessions' ids, each described by its name.
 func hostSessionNames(ctx context.Context, host string) []string {
 	conn, done, err := runningDaemon(ctx)
 	if err != nil {
@@ -630,9 +594,6 @@ func hostSessionNames(ctx context.Context, host string) []string {
 	}
 	var out []string
 	for _, s := range sessionsOn(snapshotOf(wire), host) {
-		if s.Name != "" && !strings.ContainsAny(s.Name, " \t") {
-			out = append(out, s.Name+"\t"+s.ID)
-		}
 		out = append(out, s.ID+"\t"+cmpOr(s.Name, "(unnamed)"))
 	}
 	return out
