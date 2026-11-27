@@ -276,9 +276,8 @@ func TestSessionsFromARemoteHost(t *testing.T) {
 	typed, shown := hostTerminal(t, sock, other)
 	b.change(func() {
 		b.sockets["r1"] = sock
-		// The host's own Default has the id every Default has: "default".
 		b.groups = []*core.Group{{ID: "g1", Name: "Backend", SortKey: 1, CreatedAt: time.Now()},
-			{ID: store.DefaultGroupID, Name: "Default", IsDefault: true, CreatedAt: time.Now()}}
+			{ID: "g2", Name: "Docs", SortKey: 2, CreatedAt: time.Now()}}
 		b.sessions = append(b.sessions, &core.Session{ID: "r1", Name: "api", Cwd: other, HarnessKind: core.HarnessTerminal, GroupID: "g1",
 			Status: core.StatusWaiting, Remote: true, CreatedAt: time.Now()})
 		b.inbox = []core.InboxItem{{ID: 5, SessionID: "r1", Kind: core.InboxPermission, Text: "Bash", Options: core.PermissionOptions,
@@ -428,24 +427,24 @@ func TestSessionsFromARemoteHost(t *testing.T) {
 		res.Results[1].ID != local.ID || res.Results[1].Host != "" || !res.Results[1].OK {
 		t.Errorf("a batch across here and the host: %+v", res)
 	}
-	// Each Default is its own machine's, though both are "default": with the
-	// host connected, this machine's session moves into this machine's
-	// Default, and the host's into the host's.
+	// Moving out of a group is each machine's own: with the host connected,
+	// this machine's session leaves this machine's group, and the host's
+	// leaves the host's.
 	var mine ipc.Group
 	must(t, call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "Mine"}, &mine))
 	must(t, call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(local.ID), GroupID: mine.ID}, nil))
-	must(t, call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(local.ID), GroupID: store.DefaultGroupID}, nil))
+	must(t, call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(local.ID)}, nil))
 	if strings.Contains(strings.Join(b.calls(), "\n"), local.ID) {
 		t.Error("this machine's session went to the host")
 	}
-	must(t, call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.On("studio", s.ID), GroupID: store.DefaultGroupID, Host: "studio"}, nil))
-	if b.get("r1").GroupID != store.DefaultGroupID {
-		t.Errorf("the host's session isn't in the host's Default: %q", b.get("r1").GroupID)
+	must(t, call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.On("studio", s.ID), Host: "studio"}, nil))
+	if b.get("r1").GroupID != "" {
+		t.Errorf("the host's session is still in a group: %q", b.get("r1").GroupID)
 	}
 	// A move whose session and group are on different machines is refused.
-	err = call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.On("studio", s.ID), GroupID: store.DefaultGroupID}, nil)
+	err = call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.On("studio", s.ID), GroupID: mine.ID}, nil)
 	if codeOf(err) != ipc.CodeInvalid {
-		t.Errorf("moved a host's session into this machine's Default: %v", err)
+		t.Errorf("moved a host's session into this machine's group: %v", err)
 	}
 	if err := call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutMove, Targets: targets, GroupID: "g1", Host: "studio"}, nil); codeOf(err) != ipc.CodeInvalid {
 		t.Errorf("moved sessions of two machines at once: %v", err)

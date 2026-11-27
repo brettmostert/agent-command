@@ -29,8 +29,13 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// DefaultGroupID is the id of the Default group, created by the first migration.
-const DefaultGroupID = "default"
+// groupRef is a session's group id as the database holds it: NULL for none.
+func groupRef(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
 
 // ErrNotFound is returned when a row doesn't exist.
 var ErrNotFound = errors.New("not found")
@@ -186,21 +191,53 @@ func (s *Store) migrate(ctx context.Context, existed bool) error {
 		}
 	}
 	for _, m := range ms[current:] {
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
+		if err := s.apply(ctx, m); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+	}
+	return nil
+}
+
+// foreignKeysOff marks a migration that rebuilds a table: SQLite's steps for
+// that need foreign keys off, which only works outside a transaction.
+const foreignKeysOff = "-- acmd:foreign-keys-off"
+
+// apply runs one migration in a transaction. One marked foreignKeysOff runs
+// with foreign keys off, and must leave none broken.
+func (s *Store) apply(ctx context.Context, m migration) error {
+	offKeys := strings.HasPrefix(m.sql, foreignKeysOff)
+	if offKeys {
+		if _, err := s.db.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+			return err
+		}
+		defer func() { _, _ = s.db.ExecContext(ctx, "PRAGMA foreign_keys = ON") }()
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("migration %s: %w", m.name, err)
+	}
+	if offKeys {
+		var table string
+		err := tx.QueryRowContext(ctx, "PRAGMA foreign_key_check").Scan(&table)
+		if err == nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("migration %s: it leaves a broken reference in %s", m.name, table)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
 			_ = tx.Rollback()
 			return fmt.Errorf("migration %s: %w", m.name, err)
 		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("migration %s: %w", m.name, err)
-		}
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", m.version)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("migration %s: %w", m.name, err)
 	}
 	return nil
 }

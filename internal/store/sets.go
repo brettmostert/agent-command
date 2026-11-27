@@ -51,7 +51,7 @@ func (s *Store) CreateSet(ctx context.Context, id string, ids ...string) (*core.
 		group := members[0].GroupID
 		for i, m := range members {
 			if _, err := tx.ExecContext(ctx, `UPDATE sessions SET set_id = ?, set_order = ?, group_id = ? WHERE id = ?`,
-				id, i+1, group, m.ID); err != nil {
+				id, i+1, groupRef(group), m.ID); err != nil {
 				return err
 			}
 		}
@@ -104,7 +104,7 @@ func (s *Store) AddToSet(ctx context.Context, setID, id, after string) error {
 			order = append(order, m.ID)
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET set_id = ?, group_id = ? WHERE id = ?`,
-			setID, members[0].GroupID, sess.ID); err != nil {
+			setID, groupRef(members[0].GroupID), sess.ID); err != nil {
 			return err
 		}
 		return renumber(ctx, tx, order)

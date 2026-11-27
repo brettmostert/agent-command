@@ -148,7 +148,6 @@ pub const Group = struct {
     name: []const u8 = "",
     color: []const u8 = "",
     order: i32 = 0,
-    is_default: bool = false,
     created_at: []const u8 = "",
     archived_at: []const u8 = "",
 };
@@ -809,7 +808,7 @@ test "encodeRequest and decodeResponse match internal/ipc/ipc.go schemas" {
     );
 
     const go_snapshot_resp =
-        \\{"ok":true,"data":{"sessions":[{"id":"s1","name":"api","description":"fix bug","group_id":"g1","status":"waiting","unseen":true,"kind":"hosted","harness_kind":"claude","pid":123}],"groups":[{"id":"g1","type":"group","name":"Default","color":"#4EA7FC","is_default":true}],"view_state":{"mode":"groups","sort":"activity","desc":true}}}
+        \\{"ok":true,"data":{"sessions":[{"id":"s1","name":"api","description":"fix bug","group_id":"g1","status":"waiting","unseen":true,"kind":"hosted","harness_kind":"claude","pid":123}],"groups":[{"id":"g1","type":"group","name":"Work","color":"#4EA7FC"}],"view_state":{"mode":"groups","sort":"activity","desc":true}}}
     ;
 
     var snap = try decodeResponse(Snapshot, allocator, go_snapshot_resp);
@@ -824,8 +823,7 @@ test "encodeRequest and decodeResponse match internal/ipc/ipc.go schemas" {
 
     const groups = snap.value.groups.?;
     try std.testing.expectEqual(@as(usize, 1), groups.len);
-    try std.testing.expectEqualStrings("Default", groups[0].name);
-    try std.testing.expect(groups[0].is_default);
+    try std.testing.expectEqualStrings("Work", groups[0].name);
 
     try std.testing.expectEqualStrings("groups", snap.value.view_state.mode);
     try std.testing.expectEqualStrings("activity", snap.value.view_state.sort);
@@ -868,7 +866,10 @@ test "decodes the daemon's snapshot fixture" {
     const groups = snap.value.groups.?;
     try std.testing.expectEqualStrings("Backend", groups[0].name);
     try std.testing.expectEqual(@as(i32, 10), groups[0].order);
-    try std.testing.expect(groups[1].is_default);
+    try std.testing.expectEqualStrings("Docs", groups[1].name);
+    try std.testing.expectEqual(@as(i32, 20), groups[1].order);
+    // s3 is in no group: there's no group or parent to follow.
+    try std.testing.expect(snap.value.groupOf(sessions[2]) == null);
     try std.testing.expectEqualStrings("activity", snap.value.view_state.sort);
     try std.testing.expect(snap.value.view_state.desc);
 }

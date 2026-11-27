@@ -27,6 +27,8 @@ nonisolated enum PaletteAction: Equatable {
     case focusGroup(String?)
     /// Asks, then archives a group and its sessions, by key.
     case archiveGroup(String)
+    /// Takes sessions out of their group.
+    case moveToNoGroup([Session])
     case closePane
     case focus(FocusDirection)
     case equalizePanes
@@ -116,7 +118,8 @@ enum Palette {
         ("Reset font size", "⌘0", "reset_font_size"),
     ]
 
-    /// Moving sessions to each group none of them is in already, and to a new one.
+    /// Moving sessions to each group none of them is in already, to a new one,
+    /// and out of their group when any is in one.
     static func groupEntries(_ sessions: [Session], section: String, groups: [SessionGroup]) -> [PaletteEntry] {
         var list: [PaletteEntry] = []
         let hosts = Set(sessions.map(\.hostName))
@@ -125,6 +128,10 @@ enum Palette {
                                      action: .moveToGroup(sessions, group: group.key)))
         }
         list.append(PaletteEntry(section: section, title: "Move to a new group…", action: .newGroup(sessions)))
+        let live = Set(SidebarLayout.orderedGroups(groups).map(\.key))
+        if sessions.contains(where: { $0.groupKey.map(live.contains) ?? false }) {
+            list.append(PaletteEntry(section: section, title: "Move to No Group", action: .moveToNoGroup(sessions)))
+        }
         return list
     }
 
@@ -258,9 +265,7 @@ enum Palette {
         if group.key != state.focusedGroup?.key {
             list.append(PaletteEntry(section: "Groups", title: "Focus \(group.title)", key: group.key, action: .focusGroup(group.key)))
         }
-        if !group.isDefault {
-            list.append(PaletteEntry(section: "Groups", title: "Archive group \(group.title)…", key: group.key, action: .archiveGroup(group.key)))
-        }
+        list.append(PaletteEntry(section: "Groups", title: "Archive group \(group.title)…", key: group.key, action: .archiveGroup(group.key)))
         return list
     }
 
@@ -279,6 +284,16 @@ enum Palette {
         }
         if !group.host.isEmpty { notes.append("It's archived on \(group.host), its host.") }
         return (title, notes.joined(separator: " "))
+    }
+
+    /// The question and note of the alert that confirms deleting a group: its
+    /// sessions are archived, so to keep one, move it out first.
+    static func groupDeletePrompt(_ group: SessionGroup, sessions: [Session]) -> (title: String, note: String) {
+        let archive = groupArchivePrompt(group, sessions: sessions)
+        guard !sessions.isEmpty else { return ("Delete \(group.title)?", "It has no sessions.") }
+        let count = sessions.count == 1 ? "its 1 session" : "its \(sessions.count) sessions"
+        return ("Delete \(group.title), and archive \(count)?",
+                "To keep a session, move it out first. " + archive.note)
     }
 
     /// Remote on or off for the targets on this Mac (on, unless all are already),

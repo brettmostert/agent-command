@@ -188,7 +188,7 @@ func TestHostBackendRunsOps(t *testing.T) {
 	}
 	var s ipc.Session
 	must(t, json.Unmarshal(raw, &s))
-	if s.Name != "api" || s.Parent == "" {
+	if s.Name != "api" || s.Parent != "" || s.GroupID != "" { // in no group
 		t.Errorf("new = %s", raw)
 	}
 	rev, _ := d.changes.current()

@@ -27,6 +27,8 @@ struct SidebarView: View {
     var clickGroup: (SessionGroup) -> Void = { _ in }
     /// Asks, then archives a group and its sessions.
     var archiveGroup: (SessionGroup) -> Void = { _ in }
+    /// Asks, then deletes a group and archives its sessions.
+    var deleteGroup: (SessionGroup) -> Void = { _ in }
     @State private var showArchived = false
 
     private var theme: AppTheme { .shared }
@@ -127,6 +129,8 @@ struct SidebarView: View {
                         switch sidebarRow {
                         case .header(let header):
                             groupHeader(header)
+                        case .noGroup(let header):
+                            noGroupLine(header)
                         case .session(let session, let link):
                             sessionRow(session, link: link)
                         }
@@ -171,20 +175,34 @@ struct SidebarView: View {
                 } else {
                     Button("Focus") { store.focusGroup(group.key) }
                 }
-                if !group.isDefault {
-                    Button("Rename…") { renameGroup(group) }
-                    Menu("Colour") {
-                        ForEach(SessionGroup.colors, id: \.self) { color in
-                            Button(color.capitalized) { store.setGroupColor(group.key, color) }
-                        }
+                Button("Rename…") { renameGroup(group) }
+                Menu("Colour") {
+                    ForEach(SessionGroup.colors, id: \.self) { color in
+                        Button(color.capitalized) { store.setGroupColor(group.key, color) }
                     }
-                    Button("Move Up") { store.moveGroup(group.key, by: -1) }
-                    Button("Move Down") { store.moveGroup(group.key, by: 1) }
-                    Divider()
-                    Button("Archive Group…") { archiveGroup(group) }
-                    Button("Delete Group") { store.deleteGroup(group.key) }
                 }
+                Button("Move Up") { store.moveGroup(group.key, by: -1) }
+                Button("Move Down") { store.moveGroup(group.key, by: 1) }
+                Divider()
+                Button("Archive Group…") { archiveGroup(group) }
+                Button("Delete Group…") { deleteGroup(group) }
             }
+    }
+
+    /// The quiet line over a host's sessions in no group. It isn't a group: no
+    /// menu, colour or collapse. Sessions dropped on it leave their group.
+    private func noGroupLine(_ header: NoGroupHeader) -> some View {
+        HStack(spacing: 6) {
+            Text(header.title).foregroundStyle(theme.dim).lineLimit(1)
+            Spacer(minLength: 0)
+            Text("\(header.count)").foregroundStyle(theme.dim)
+        }
+        .font(AppFont.ui(12))
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .contentShape(Rectangle())
+        .dropDestination(for: String.self) { items, _ in drop(items, onto: header.dropKey) }
     }
 
     /// The groups a session can move to, and a new one.
@@ -197,6 +215,9 @@ struct SidebarView: View {
             }
             Divider()
             Button("New Group…") { newGroup(store.actionTargets(forRow: session)) }
+            if session.groupKey != nil {
+                Button("No Group") { store.moveToNoGroup(store.actionTargets(forRow: session).map(\.id)) }
+            }
         }
     }
 
@@ -247,7 +268,7 @@ struct SidebarView: View {
                             }
                             .draggable(SidebarDrop.sessionItem(session.id))
                             .dropDestination(for: String.self) { items, _ in
-                                drop(items, onto: session.groupKey ?? SessionGroup.key(session.hostName, "default"))
+                                drop(items, onto: session.groupKey ?? SidebarLayout.noGroupKey(session.hostName))
                             }
     }
 
@@ -309,8 +330,12 @@ struct SidebarView: View {
     private func archivedHeader(_ section: ArchivedSection) -> some View {
         let group = section.group
         return HStack(spacing: 6) {
-            Text(group.title).fontWeight(.bold).foregroundStyle(GroupHeaderRow.color(group.color, theme: theme)).lineLimit(1)
-            if group.isArchived {
+            if let group {
+                Text(group.title).fontWeight(.bold).foregroundStyle(GroupHeaderRow.color(group.color, theme: theme)).lineLimit(1)
+            } else {
+                Text(section.title).foregroundStyle(theme.dim).lineLimit(1)
+            }
+            if group?.isArchived == true {
                 Text("archived").font(AppFont.ui(11)).foregroundStyle(theme.dim)
             }
             Spacer(minLength: 0)
@@ -321,7 +346,7 @@ struct SidebarView: View {
         .padding(.top, 6)
         .contentShape(Rectangle())
         .contextMenu {
-            if group.isArchived {
+            if let group, group.isArchived {
                 Button("Unarchive Group") { store.unarchiveGroup(group.key, sessions: false) }
                 Button("Unarchive Group and Sessions") { store.unarchiveGroup(group.key, sessions: true) }
             }

@@ -181,7 +181,7 @@ func resolveSession(snap snapshot, sel string) (*core.Session, error) {
 	return core.Resolve(rows, snap.Sessions, sel)
 }
 
-// resolveGroup finds a live group by id or case-insensitive name ("default" works).
+// resolveGroup finds a live group by id or case-insensitive name.
 func resolveGroup(snap snapshot, sel string) (*core.Group, error) {
 	return resolveGroupOn(snap, sel, "")
 }

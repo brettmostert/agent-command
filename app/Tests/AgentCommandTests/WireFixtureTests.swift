@@ -36,7 +36,9 @@ private func fixture(_ name: String) throws -> Data {
 
     let groups = try #require(snap.groups)
     #expect(groups[0] == SessionGroup(id: "g1", name: "Backend", color: "blue", order: 10))
-    #expect(groups[1].isDefault && groups[1].order == 0 && !groups[1].isArchived)
+    #expect(groups[1].name == "Docs" && groups[1].order == 20 && !groups[1].isArchived)
+    // Sessions in no group have no group or parent on the wire.
+    #expect(sessions[2].groupID == nil && sessions[2].groupKey == nil && sessions[2].parent == nil)
 
     #expect(snap.inbox?.first?.options == ["Yes", "No"] && snap.inbox?.first?.sessionID == "s1")
     let job = try #require(snap.jobs?.first)

@@ -153,8 +153,8 @@ private func decodeJob(_ fields: [String: Any]) throws -> Job {
 }
 
 @Test func aGroupFromTheDaemon() throws {
-    let groups = try JSONDecoder().decode([SessionGroup].self, from: Data(#"[{"id":"default","name":"Default","is_default":true},{"id":"G","name":"Old","archived_at":"2026-11-01T00:00:00Z"}]"#.utf8))
-    #expect(groups[0].isDefault && !groups[0].isArchived)
+    let groups = try JSONDecoder().decode([SessionGroup].self, from: Data(#"[{"id":"W","name":"Work"},{"id":"G","name":"Old","archived_at":"2026-11-01T00:00:00Z"}]"#.utf8))
+    #expect(groups[0].name == "Work" && !groups[0].isArchived)
     #expect(groups[1].isArchived)
     #expect(!SessionGroup(id: "x", name: "x").isArchived)
 }

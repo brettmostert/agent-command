@@ -362,8 +362,7 @@ type Mutation struct {
 	// Host is the machine its group, set and neighbor are on, and the one
 	// a mutation with no targets is for (the group kinds, a new group): a
 	// known Remote host's name, or "" for this machine. A host is always
-	// named, never found from an id: ids are unique only within their host,
-	// and every host's Default group is "default".
+	// named, never found from an id: ids are unique only within their host.
 	Host string `json:"host,omitempty"`
 }
 

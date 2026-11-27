@@ -247,7 +247,7 @@ func busy(st core.Status) bool {
 	return st == core.StatusStarting || st == core.StatusBusy || st == core.StatusWaiting
 }
 
-// jobGroup is the job's group if it still exists, else the Default group.
+// jobGroup is the job's group if it's still live, else no group ("").
 func (d *Daemon) jobGroup(ctx context.Context, j *core.Job) string {
 	if j.GroupID == "" {
 		return ""

@@ -50,13 +50,11 @@ func (f *fakeDaemon) called() []string {
 func sampleSnapshot() ipc.Snapshot {
 	t0 := time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC)
 	sessions := []*core.Session{
-		{ID: "L1", Name: "api", Kind: core.KindHosted, Status: core.StatusBusy, GroupID: "default", CreatedAt: t0},
-		{ID: "L2", Name: "web", Kind: core.KindHosted, Status: core.StatusWaiting, GroupID: "default", CreatedAt: t0.Add(time.Minute)},
+		{ID: "L1", Name: "api", Kind: core.KindHosted, Status: core.StatusBusy, CreatedAt: t0},
+		{ID: "L2", Name: "web", Kind: core.KindHosted, Status: core.StatusWaiting, CreatedAt: t0.Add(time.Minute)},
 		{ID: "r1", Name: "docs", Kind: core.KindHosted, Host: "studio", Status: core.StatusDone, GroupID: "g1", CreatedAt: t0},
 	}
 	groups := []*core.Group{
-		{ID: "default", Name: "Default", IsDefault: true},
-		{ID: "default", Name: "Default", IsDefault: true, Host: "studio"},
 		{ID: "g1", Name: "Writing", Host: "studio", SortKey: 1, Collapsed: true},
 	}
 	return ipc.Snapshot{
@@ -198,9 +196,9 @@ func TestDrawsTheSessionsHereThenEachHost(t *testing.T) {
 			t.Errorf("screen lacks %q:\n%s", want, s)
 		}
 	}
-	// A lone Default has no header, as in the sidebar; a host's empty one none.
-	if strings.Contains(s, "Default") {
-		t.Errorf("a Default header:\n%s", s)
+	// Sessions in no group, with no groups here, have no header, as in the sidebar.
+	if strings.Contains(s, "No group") {
+		t.Errorf("a No group header with no groups here:\n%s", s)
 	}
 	if strings.Index(s, "This machine") > strings.Index(s, "studio") {
 		t.Errorf("a host comes before this machine:\n%s", s)
@@ -389,7 +387,7 @@ func TestKeepsTheSelectionOnScreen(t *testing.T) {
 	var many []*core.Session
 	for i := range 40 {
 		many = append(many, &core.Session{ID: "S" + string(rune('A'+i)), Name: "s" + string(rune('a'+i%26)) + string(rune('0'+i/26)),
-			Kind: core.KindHosted, GroupID: "default", CreatedAt: time.Unix(int64(i), 0)})
+			Kind: core.KindHosted, CreatedAt: time.Unix(int64(i), 0)})
 	}
 	snap.Sessions = ipc.SessionsOf(many)
 	h := newHarness(t, snap)

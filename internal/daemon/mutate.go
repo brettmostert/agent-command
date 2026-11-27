@@ -127,7 +127,7 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutGroupColor:
 		return nil, st.SetGroupColor(ctx, m.GroupID, m.Color)
 	case ipc.MutGroupDelete:
-		return nil, st.DeleteGroup(ctx, m.GroupID)
+		return nil, d.deleteGroup(ctx, m.GroupID)
 	case ipc.MutGroupArchive:
 		return nil, d.archiveGroup(ctx, m.GroupID)
 	case ipc.MutGroupUnarchive:
@@ -288,6 +288,9 @@ func (d *Daemon) unarchive(ctx context.Context, id string) error {
 		if err := st.UpdateSession(ctx, s); err != nil {
 			return err
 		}
+		if s.GroupID == "" {
+			return nil // in no group
+		}
 		g, err := st.Group(ctx, s.GroupID)
 		if err != nil || g.ArchivedAt.IsZero() {
 			return err
@@ -300,19 +303,26 @@ func (d *Daemon) unarchive(ctx context.Context, id string) error {
 	})
 }
 
-// archiveGroup archives a group and its sessions, all or nothing. It checks
-// the group before it changes anything, and stops the sessions' processes
-// only once the archive is saved.
+// archiveGroup archives a group and its sessions, all or nothing.
 func (d *Daemon) archiveGroup(ctx context.Context, id string) error {
-	g, err := d.store.Group(ctx, id)
-	if err != nil {
+	return d.withGroupArchived(ctx, id, func(st *store.Store) error { return st.SetGroupArchived(ctx, id, true) })
+}
+
+// deleteGroup deletes a group and archives its sessions, all or nothing: to
+// keep a session, move it out first.
+func (d *Daemon) deleteGroup(ctx context.Context, id string) error {
+	return d.withGroupArchived(ctx, id, func(st *store.Store) error { return st.DeleteGroup(ctx, id) })
+}
+
+// withGroupArchived archives the live sessions in group id, then does then,
+// in one transaction. It checks the group before it changes anything, and
+// stops the sessions' processes only once it's saved.
+func (d *Daemon) withGroupArchived(ctx context.Context, id string, then func(*store.Store) error) error {
+	if _, err := d.store.Group(ctx, id); err != nil {
 		return err
 	}
-	if g.IsDefault {
-		return invalid("the Default group can't be archived")
-	}
 	var archived []*core.Session
-	err = d.store.WithTx(ctx, func(st *store.Store) error {
+	err := d.store.WithTx(ctx, func(st *store.Store) error {
 		sessions, err := st.Sessions(ctx, false)
 		if err != nil {
 			return err
@@ -326,7 +336,7 @@ func (d *Daemon) archiveGroup(ctx context.Context, id string) error {
 			}
 			archived = append(archived, s)
 		}
-		return st.SetGroupArchived(ctx, id, true)
+		return then(st)
 	})
 	if err != nil {
 		return err
@@ -339,7 +349,6 @@ func (d *Daemon) archiveGroup(ctx context.Context, id string) error {
 
 // moveGroup puts a group right after the group after, or right before the
 // group before (section 7.3 of the design: reorders name a neighbor).
-// Default stays last.
 func (d *Daemon) moveGroup(ctx context.Context, id, after, before string) error {
 	if (after == "") == (before == "") {
 		return errors.New("group.move needs the group it goes after, or before")
@@ -348,12 +357,7 @@ func (d *Daemon) moveGroup(ctx context.Context, id, after, before string) error 
 	if err != nil {
 		return err
 	}
-	var order []*core.Group
-	for _, g := range groups {
-		if !g.IsDefault {
-			order = append(order, g)
-		}
-	}
+	order := slices.Clone(groups)
 	sort.SliceStable(order, func(i, j int) bool { return order[i].SortKey < order[j].SortKey })
 	at := -1
 	for i, g := range order {

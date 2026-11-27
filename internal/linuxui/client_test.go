@@ -207,7 +207,7 @@ func TestStoreApplyEntities(t *testing.T) {
 		Rev:  10,
 		Type: ipc.EventSnapshot,
 		Snapshot: &ipc.Snapshot{
-			Groups: []*ipc.Group{{ID: "g1", Name: "Default", IsDefault: true}},
+			Groups: []*ipc.Group{{ID: "g1", Name: "Work"}},
 		},
 	})
 	if err != nil || !changed {

@@ -265,7 +265,7 @@
     },
     {
       "name": "group.delete",
-      "description": "Deletes a group. Its sessions move to the Default group.",
+      "description": "Deletes a group, and archives its sessions.",
       "scope": "act",
       "kind": "destructive",
       "grant": "entities",
@@ -1334,7 +1334,7 @@
     },
     {
       "name": "session.move",
-      "description": "Moves sessions to a group.",
+      "description": "Moves sessions to a group, or (with no group) out of theirs.",
       "scope": "act",
       "kind": "change",
       "grant": "entities",
@@ -2541,9 +2541,6 @@
         },
         "order": {
           "type": "integer"
-        },
-        "is_default": {
-          "type": "boolean"
         },
         "created_at": {
           "type": "string",
@@ -4054,8 +4051,6 @@
         "type",
         "id",
         "name",
-        "group_id",
-        "parent",
         "cwd",
         "status",
         "kind",

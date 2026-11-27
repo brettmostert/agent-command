@@ -9,7 +9,6 @@ import (
 
 	"github.com/brettmostert/agent-command/internal/core"
 	"github.com/brettmostert/agent-command/internal/ipc"
-	"github.com/brettmostert/agent-command/internal/store"
 )
 
 // archivedCount is how many of the sessions with these Claude ids are archived.
@@ -37,21 +36,36 @@ func groupArchived(t *testing.T, c *ipc.Conn, id string) bool {
 	return false
 }
 
-func TestArchivingDefaultChangesNothing(t *testing.T) {
+// Deleting a group archives its sessions; one moved out first is kept, in no
+// group (PAN-187).
+func TestDeletingAGroupArchivesItsSessions(t *testing.T) {
 	p := testPaths(t)
 	start(t, p)
 	c := dial(t, p)
-	seedHosted(t, p, "a", "b")
+	ids := seedHosted(t, p, "a", "b", "keep")
+	var g ipc.Group
+	must(t, c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "G"}, &g))
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(ids...), GroupID: g.ID})
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(ids[2])}) // out of its group
 
-	err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: store.DefaultGroupID}, nil)
-	if !hasCode(err, ipc.CodeInvalid) {
-		t.Fatalf("archiving Default: want %s, got %v", ipc.CodeInvalid, err)
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupDelete, GroupID: g.ID})
+	snap := snapshot(t, c)
+	if len(snap.Groups) != 0 {
+		t.Errorf("the group is still there: %+v", snap.Groups)
 	}
-	if n := archivedCount(t, c, "a", "b"); n != 0 {
-		t.Errorf("archiving Default archived %d of its sessions", n)
+	if n := archivedCount(t, c, "a", "b"); n != 2 {
+		t.Errorf("archived %d of the group's 2 sessions", n)
 	}
-	if groupArchived(t, c, store.DefaultGroupID) {
-		t.Error("Default is archived")
+	for _, cid := range []string{"a", "b", "keep"} {
+		if s := byClaude(snap, cid); s.GroupID != "" {
+			t.Errorf("%s is in %q, want no group", cid, s.GroupID)
+		}
+	}
+	if archivedCount(t, c, "keep") != 0 {
+		t.Error("a session moved out first was archived")
+	}
+	if err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupDelete, GroupID: g.ID}, nil); !hasCode(err, ipc.CodeNotFound) {
+		t.Errorf("deleting it again: %v", err)
 	}
 }
 

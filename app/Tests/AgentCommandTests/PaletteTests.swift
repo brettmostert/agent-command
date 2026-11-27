@@ -176,13 +176,15 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
 @Test func thePaletteMovesSessionsToGroupsTheyArentIn() throws {
     var a = try makeSession(id: "a")
     a.groupID = "api"
-    var b = try makeSession(id: "b")
-    b.groupID = "default"
-    let groups = [SessionGroup(id: "default", name: "Default", isDefault: true), SessionGroup(id: "api", name: "api", order: 10)]
+    let b = try makeSession(id: "b") // in no group
+    let groups = [SessionGroup(id: "web", name: "web", order: 5), SessionGroup(id: "api", name: "api", order: 10)]
     let one = Palette.entries(PaletteState(targets: [a], sessions: [a], groups: groups))
     let section = "Claude session"
-    #expect(entry(one, section, "Move to Default")?.action == .moveToGroup([a], group: "default"))
+    #expect(entry(one, section, "Move to web")?.action == .moveToGroup([a], group: "web"))
     #expect(entry(one, section, "Move to api") == nil, "it's already there")
+    #expect(entry(one, section, "Move to No Group")?.action == .moveToNoGroup([a]))
+    let loose = Palette.entries(PaletteState(targets: [b], sessions: [b], groups: groups))
+    #expect(entry(loose, section, "Move to No Group") == nil, "it's in no group already")
     let both = Palette.entries(PaletteState(targets: [a, b], sessions: [a, b], groups: groups))
     #expect(entry(both, "2 sessions", "Move to api")?.action == .moveToGroup([a, b], group: "api"), "b isn't in it yet")
     #expect(entry(both, "2 sessions", "Move to a new group…")?.action == .newGroup([a, b]))
@@ -192,7 +194,7 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
 
 @Test func theGroupsCommandsFocusAndArchiveTheGroupYoureIn() {
     let web = SessionGroup(id: "web", name: "web")
-    let def = SessionGroup(id: "default", name: "Default", isDefault: true)
+    let api = SessionGroup(id: "api", name: "api")
     var state = PaletteState(group: web)
     var entries = Palette.entries(state)
     #expect(titles(entries, in: "Groups") == ["Focus web", "Archive group web…"])
@@ -204,8 +206,8 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     #expect(titles(entries, in: "Groups") == ["Leave focus on web", "Archive group web…"], "no Focus for the group already focused")
     #expect(entry(entries, "Groups", "Leave focus on web")?.action == .focusGroup(nil))
 
-    state.group = def
-    #expect(titles(Palette.entries(state), in: "Groups") == ["Leave focus on web", "Focus Default"], "Default can't be archived")
+    state.group = api
+    #expect(titles(Palette.entries(state), in: "Groups") == ["Leave focus on web", "Focus api", "Archive group api…"])
     #expect(titles(Palette.entries(PaletteState()), in: "Groups").isEmpty)
 }
 
@@ -226,4 +228,15 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     let none = Palette.groupArchivePrompt(SessionGroup(id: "g", name: "ops", host: "studio"), sessions: [])
     #expect(none.title == "Archive ops · studio?" && none.note == "It's archived on studio, its host.")
     #expect(Palette.groupArchivePrompt(web, sessions: [running]).note.hasPrefix("1 running session will be stopped."))
+}
+
+@Test func deletingAGroupSaysItArchivesItsSessions() throws {
+    let web = SessionGroup(id: "web", name: "web")
+    let running = try makeSession(id: "a", status: "busy")
+    let two = Palette.groupDeletePrompt(web, sessions: [running, try makeSession(id: "b", status: "paused")])
+    #expect(two.title == "Delete web, and archive its 2 sessions?")
+    #expect(two.note.hasPrefix("To keep a session, move it out first. 1 running session will be stopped."))
+    #expect(Palette.groupDeletePrompt(web, sessions: [running]).title == "Delete web, and archive its 1 session?")
+    let none = Palette.groupDeletePrompt(web, sessions: [])
+    #expect(none.title == "Delete web?" && none.note == "It has no sessions.")
 }

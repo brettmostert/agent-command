@@ -13,8 +13,8 @@ import (
 // sets show here as the host has them, with their own ids and their host.
 // An op on one of them names its host ({host, id}, design 7.4), and goes to
 // it: the host makes the change, and its tree follows here. A host is never
-// found from an id: ids are unique only within their host, and every host's
-// Default group is "default". Structure never crosses hosts: a host's
+// found from an id: ids are unique only within their host. Structure never
+// crosses hosts: a host's
 // sessions stay in its own groups and sets.
 
 // forwardToHost runs req on the host it names, and says whether it did.

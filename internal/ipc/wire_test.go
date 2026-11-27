@@ -28,14 +28,14 @@ func sampleSnapshot() Snapshot {
 			HarnessKind: core.HarnessClaude, HarnessID: "h-work", Pid: 4242, Remote: true, CreatedAt: at, LastEventAt: at.Add(time.Minute), StatusSince: at.Add(time.Minute)},
 		{ID: "s2", Name: "docs", GroupID: "g1", Cwd: "/w/docs", Status: core.StatusBusy, Kind: core.KindHosted, HarnessKind: core.HarnessClaude, HarnessID: "h-gone",
 			SetID: "set1", SetOrder: 2, CreatedAt: at},
-		{ID: "s3", Name: "shell", GroupID: "default", Cwd: "/w", Status: core.StatusDone, Kind: core.KindHosted, HarnessKind: core.HarnessTerminal,
+		{ID: "s3", Name: "shell", Cwd: "/w", Status: core.StatusDone, Kind: core.KindHosted, HarnessKind: core.HarnessTerminal,
 			CreatedAt: at, ArchivedAt: at.Add(time.Hour)},
-		{ID: "s4", Name: "build", GroupID: "default", Cwd: "/r/build", Status: core.StatusDone, Kind: core.KindHosted, HarnessKind: core.HarnessClaude,
+		{ID: "s4", Name: "build", Cwd: "/r/build", Status: core.StatusDone, Kind: core.KindHosted, HarnessKind: core.HarnessClaude,
 			Host: "studio", RemoteID: "r9", JobID: "j1", CreatedAt: at},
 	}
 	groups := []*core.Group{
 		{ID: "g1", Name: "Backend", Color: "blue", SortKey: 10, CreatedAt: at, Collapsed: true},
-		{ID: "default", Name: "Default", IsDefault: true, SortKey: 99, CreatedAt: at},
+		{ID: "g2", Name: "Docs", SortKey: 20, CreatedAt: at},
 	}
 	job := &core.Job{ID: "j1", JobSpec: core.JobSpec{Name: "nightly", GroupID: "g1", Schedule: "0 2 * * *", Prompt: "Run the tests",
 		Where: core.WhereFolder, Cwd: "/w/api"}, Cron: "0 2 * * *", Summary: "Every day at 2:00", CreatedAt: at, UpdatedAt: at,
@@ -192,10 +192,10 @@ func TestTheSnapshotBackAsCore(t *testing.T) {
 		t.Errorf("sessions: %+v %+v", ss[0], ss[1])
 	}
 	gs := back.CoreGroups()
-	if !gs[0].Collapsed || gs[0].SortKey != 10 || gs[1].Collapsed || !gs[1].IsDefault {
+	if !gs[0].Collapsed || gs[0].SortKey != 10 || gs[1].Collapsed || gs[1].SortKey != 20 {
 		t.Errorf("groups: %+v %+v", gs[0], gs[1])
 	}
-	if back.Groups[0].Type != "group" || back.Groups[1].Order != 0 {
+	if back.Groups[0].Type != "group" || back.Groups[1].Order != 20 || back.Sessions[2].GroupID != "" || back.Sessions[2].Parent != "" {
 		t.Errorf("group wire: %+v", back.Groups)
 	}
 	if vs := back.ViewState.Core(); vs.Sort != "activity" || !vs.Desc || vs.Collapsed[0] != "g1" {

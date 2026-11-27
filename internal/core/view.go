@@ -13,7 +13,9 @@ import (
 // a session. Number is the 1-based shortcut number of visible session rows
 // (0 for headers and sessions in collapsed groups).
 type Row struct {
-	Group   *Group   // header rows (and the session's group on session rows)
+	// Group is the header's group, and a session row's group. It's nil for
+	// the "No group" header and for sessions in no group.
+	Group   *Group
 	Session *Session // nil for header rows
 	Number  int
 
@@ -23,8 +25,19 @@ type Row struct {
 	Collapsed bool
 }
 
-// IsHeader reports whether this is a group header row.
+// IsHeader reports whether this is a header row: a group's, or "No group".
 func (r Row) IsHeader() bool { return r.Session == nil }
+
+// NoGroupTitle is what the header over sessions in no group says. It isn't a group.
+const NoGroupTitle = "No group"
+
+// Title is a header's text: its group's name, or NoGroupTitle.
+func (r Row) Title() string {
+	if r.Group == nil {
+		return NoGroupTitle
+	}
+	return r.Group.Name
+}
 
 // Layout orders and numbers sessions for display according to the shared
 // view state: list or group view, sort key and direction, filter, collapse
@@ -32,25 +45,15 @@ func (r Row) IsHeader() bool { return r.Session == nil }
 // so numbers mean the same thing everywhere.
 func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 	byID := map[string]*Group{}
-	var def *Group
 	for _, g := range groups {
 		byID[g.ID] = g
-		if g.IsDefault {
-			def = g
-		}
 	}
-	if def == nil {
-		def = &Group{ID: "default", Name: "Default", IsDefault: true}
-		byID[def.ID] = def
-	}
+	// A session's group, while it shows; nil is no group.
 	groupOf := func(s *Session) *Group {
-		if g, ok := byID[s.GroupID]; ok && g.ArchivedAt.IsZero() {
+		if g, ok := byID[s.GroupID]; ok && (g.ArchivedAt.IsZero() || vs.ShowArchived) {
 			return g
 		}
-		if g, ok := byID[s.GroupID]; ok && vs.ShowArchived {
-			return g
-		}
-		return def
+		return nil
 	}
 
 	f := parseFilter(vs.Filter)
@@ -67,11 +70,11 @@ func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 
 	liveGroups := 0
 	for _, g := range groups {
-		if !g.IsDefault && g.ArchivedAt.IsZero() {
+		if g.ArchivedAt.IsZero() {
 			liveGroups++
 		}
 	}
-	// List view, or group view while only Default exists (no headers, §8.4).
+	// List view, or group view with no groups: no headers.
 	if vs.Mode == "list" || liveGroups == 0 {
 		rows := make([]Row, len(visible))
 		for i, s := range visible {
@@ -81,18 +84,18 @@ func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 	}
 
 	members := map[string][]*Session{}
+	var ungrouped []*Session
 	for _, s := range visible {
-		g := groupOf(s)
-		members[g.ID] = append(members[g.ID], s)
-	}
-	ordered := orderGroups(groups, vs.ShowArchived)
-	if _, ok := members[def.ID]; ok && !containsGroup(ordered, def) {
-		ordered = append(ordered, def)
+		if g := groupOf(s); g != nil {
+			members[g.ID] = append(members[g.ID], s)
+		} else {
+			ungrouped = append(ungrouped, s)
+		}
 	}
 
 	var rows []Row
 	n := 0
-	for _, g := range ordered {
+	for _, g := range orderGroups(groups, vs.ShowArchived) {
 		ms := members[g.ID]
 		if f.active() && len(ms) == 0 {
 			continue // filtering hides groups without matches
@@ -108,6 +111,15 @@ func Layout(sessions []*Session, groups []*Group, vs ViewState) []Row {
 			rows = append(rows, Row{Group: g, Session: s, Number: n})
 		}
 	}
+	// Sessions in no group come last, under a header that isn't a group: it
+	// never collapses.
+	if len(ungrouped) > 0 {
+		rows = append(rows, Row{Count: len(ungrouped), Urgent: mostUrgent(ungrouped)})
+		for _, s := range ungrouped {
+			n++
+			rows = append(rows, Row{Session: s, Number: n})
+		}
+	}
 	return rows
 }
 
@@ -120,24 +132,12 @@ func orderGroups(groups []*Group, showArchived bool) []*Group {
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		if a.IsDefault != b.IsDefault {
-			return !a.IsDefault // Default last
-		}
 		if a.SortKey != b.SortKey {
 			return a.SortKey < b.SortKey
 		}
 		return a.CreatedAt.Before(b.CreatedAt)
 	})
 	return out
-}
-
-func containsGroup(gs []*Group, g *Group) bool {
-	for _, x := range gs {
-		if x.ID == g.ID {
-			return true
-		}
-	}
-	return false
 }
 
 // statusRank orders statuses by urgency.
@@ -275,13 +275,17 @@ func parseFilter(s string) filter {
 func (f filter) active() bool { return len(f.text)+len(f.group) > 0 }
 
 func (f filter) match(s *Session, g *Group) bool {
-	gname := strings.ToLower(g.Name)
+	name := NoGroupTitle // g:no matches sessions in no group
+	if g != nil {
+		name = g.Name
+	}
+	gname := strings.ToLower(name)
 	for _, t := range f.group {
 		if !strings.Contains(gname, t) {
 			return false
 		}
 	}
-	hay := strings.ToLower(strings.Join([]string{s.Name, s.Description, s.Cwd, g.Name}, "\x00"))
+	hay := strings.ToLower(strings.Join([]string{s.Name, s.Description, s.Cwd, name}, "\x00"))
 	for _, t := range f.text {
 		if !strings.Contains(hay, t) {
 			return false

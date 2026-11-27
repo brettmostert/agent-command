@@ -52,40 +52,43 @@ extension UsesSharedSpeech {
             #expect(empty.cursorID == nil)
         }
 
-        /// A store with groups web and Default: a and b in web, c and d in Default.
+        /// A store with groups web and ops: a and b in web, c in ops, d in no group.
         private func grouped() throws -> SessionStore {
             let s = try store()
             s.defaults = try #require(UserDefaults(suiteName: "acmd.tests.\(UUID().uuidString)"))
             s.options = SidebarOptions()
-            for i in s.sessions.indices { s.sessions[i].groupID = i < 2 ? "web" : "default" }
-            s.groups = [SessionGroup(id: "web", name: "web", order: 10), SessionGroup(id: "default", name: "Default", isDefault: true)]
+            for (i, group) in ["web", "web", "ops", nil].enumerated() { s.sessions[i].groupID = group }
+            s.groups = [SessionGroup(id: "web", name: "web", order: 10), SessionGroup(id: "ops", name: "ops", order: 20)]
             return s
         }
 
         @Test func aHeaderIsSelectedAndTheCursorStopsOnIt() throws {
             let s = try grouped()
-            #expect(s.cursorIDs == ["group:web", "a", "b", "group:default", "c", "d"])
+            #expect(s.cursorIDs == ["group:web", "a", "b", "group:ops", "c", "d"], "No group isn't a stop")
             s.selectGroup("web")
             #expect(s.selectedGroupKey == "web" && s.cursorID == "group:web" && s.newSessionGroup?.id == "web")
             s.moveCursor(by: 1)
             #expect(s.cursorID == "a" && s.selectedGroupKey == nil, "a session's row takes over")
             s.moveCursor(by: 2)
-            #expect(s.cursorID == "group:default" && s.selectedGroupKey == "default")
+            #expect(s.cursorID == "group:ops" && s.selectedGroupKey == "ops")
             s.setSidebarFocused(true)
-            #expect(s.cursorID == "group:default", "the sidebar comes back to the group selected")
+            #expect(s.cursorID == "group:ops", "the sidebar comes back to the group selected")
             s.selectedID = "a"
             #expect(s.selectedGroupKey == nil && s.newSessionGroup?.id == "web", "showing a session makes its group the context")
+            s.selectedID = "d"
+            #expect(s.newSessionGroup == nil, "a session in no group: no group")
         }
 
         @Test func focusCollapsesTheOtherGroupsUntilYouLeave() throws {
             let s = try grouped()
             s.focusGroup("web")
-            #expect(s.focusedGroup?.id == "web" && s.sidebarIDs == ["a", "b"], "Default is collapsed")
+            #expect(s.focusedGroup?.id == "web" && s.sidebarIDs == ["a", "b", "d"], "ops is collapsed; No group never is")
             #expect(s.newSessionGroup?.id == "web", "with nothing selected, ⌘N starts in the focused group")
             s.focusGroup(nil)
             #expect(s.focusedGroup == nil && s.sidebarIDs == ["a", "b", "c", "d"])
             s.setCollapsed("web", true)
             #expect(s.sidebarIDs == ["c", "d"])
+            s.moveToNoGroup([]) // nothing to move
             s.setCollapsed("web", false)
             #expect(s.sidebarIDs.count == 4)
         }
@@ -311,15 +314,15 @@ extension UsesSharedSpeech {
             s.publish(try snapshot([
                 "sessions": [hosted("a").merging(["group_id": "web"]) { $1 }],
                 "groups": [["id": "web", "type": "group", "name": "web"], ["id": "old", "type": "group", "name": "old", "archived_at": "2026-11-01T00:00:00Z"],
-                           ["id": "default", "type": "group", "name": "Default", "is_default": true]],
+                           ["id": "docs", "type": "group", "name": "docs"]],
             ]))
             try await until("the groups") { s.allGroups.count == 3 }
-            #expect(s.groups.map(\.id) == ["web", "default"] && s.members(ofGroup: "web").map(\.id) == ["a"])
+            #expect(s.groups.map(\.id) == ["web", "docs"] && s.members(ofGroup: "web").map(\.id) == ["a"])
 
             s.selectGroup("web")
             s.focusGroup("web")
             s.archiveGroup("web")
-            s.archiveGroup("default") // Default isn't one to archive
+            s.archiveGroup("nope") // not a group
             s.unarchiveGroup("old", sessions: true)
             s.unarchiveGroup("web", sessions: false) // it isn't archived
             try await until { daemon.received("mutate").count == 2 }
@@ -330,7 +333,7 @@ extension UsesSharedSpeech {
 
             // The next snapshot has web archived: focus on it ends.
             s.publish(try snapshot(["groups": [["id": "web", "type": "group", "name": "web", "archived_at": "2026-11-02T00:00:00Z"],
-                                               ["id": "default", "type": "group", "name": "Default", "is_default": true]]]))
+                                               ["id": "docs", "type": "group", "name": "docs"]]]))
             try await until("web archived") { s.groups.count == 1 }
             #expect(s.focusedGroup == nil && s.options.focused == nil)
 

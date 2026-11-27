@@ -446,9 +446,12 @@ func (u *uiApp) renderSidebar(ctx context.Context) {
 			if r.Collapsed {
 				arrow = "▸"
 			}
-			lbl := gtk.NewLabel(fmt.Sprintf("%s %s (%d)", arrow, r.Group.Name, r.Count))
+			if r.Group == nil {
+				arrow = " " // "No group" isn't a group: it doesn't collapse
+			}
+			lbl := gtk.NewLabel(fmt.Sprintf("%s %s (%d)", arrow, r.Title(), r.Count))
 			lbl.AddCssClass("heading")
-			if r.Group.Color != "" {
+			if r.Group != nil && r.Group.Color != "" {
 				lbl.AddCssClass("group-" + r.Group.Color)
 			}
 			lbl.SetXalign(0)
@@ -456,7 +459,9 @@ func (u *uiApp) renderSidebar(ctx context.Context) {
 			box.Append(&lbl.Widget)
 			row.SetChild(&box.Widget)
 			u.list.Append(&row.Widget)
-			newMap[idx] = rowTarget{isGroup: true, groupID: r.Group.ID}
+			if r.Group != nil {
+				newMap[idx] = rowTarget{isGroup: true, groupID: r.Group.ID}
+			}
 			idx++
 			continue
 		}

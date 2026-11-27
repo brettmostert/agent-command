@@ -93,7 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 newGroup: { [weak self] sessions in self?.showNewGroup(sessions) },
                 renameGroup: { [weak self] group in self?.showRenameGroup(group) },
                 clickGroup: { [weak self] group in self?.clickSidebarGroup(group) },
-                archiveGroup: { [weak self] group in self?.archiveGroup(group.key) }
+                archiveGroup: { [weak self] group in self?.archiveGroup(group.key) },
+                deleteGroup: { [weak self] group in self?.deleteGroup(group.key) }
             ))
         let split = NSSplitViewController()
         split.splitView = ThemedSplitView()
@@ -467,16 +468,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// Asks, then archives a group and its sessions.
     private func archiveGroup(_ key: String) {
-        guard let group = store.group(key: key), !group.isDefault else { return }
-        let prompt = Palette.groupArchivePrompt(group, sessions: store.members(ofGroup: key))
+        guard let group = store.group(key: key) else { return }
+        if confirm(Palette.groupArchivePrompt(group, sessions: store.members(ofGroup: key)), button: "Archive") {
+            store.archiveGroup(key)
+        }
+    }
+
+    /// Asks, then deletes a group and archives its sessions.
+    private func deleteGroup(_ key: String) {
+        guard let group = store.group(key: key) else { return }
+        if confirm(Palette.groupDeletePrompt(group, sessions: store.members(ofGroup: key)), button: "Delete") {
+            store.deleteGroup(key)
+        }
+    }
+
+    /// Asks prompt, with button to go ahead and Cancel: true to go ahead.
+    private func confirm(_ prompt: (title: String, note: String), button: String) -> Bool {
         let alert = NSAlert()
         alert.messageText = prompt.title
         alert.informativeText = prompt.note
-        alert.addButton(withTitle: "Archive")
+        alert.addButton(withTitle: button)
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            store.archiveGroup(key)
-        }
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func clickSidebarRow(_ session: Session) {
@@ -604,10 +617,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    /// The group's id, making it first if it's new; nil is the host's Default.
+    /// The group's id, making it first if it's new; nil is no group.
     private func withGroup(_ group: NewSessionGroup, on host: String, _ start: @escaping (String?) -> Void) {
         switch group {
-        case .existing(let found): start(found.flatMap { $0.isDefault ? nil : $0.id })
+        case .existing(let found): start(found?.id)
         case .new(let name): store.createGroup(name, on: host) { start($0.id) }
         }
     }
@@ -1199,7 +1212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let state = PaletteState(
             targets: targets, sessions: store.sessions, needsYou: store.nextAttentionID != nil, setMembers: store.setMembers, groups: store.groups,
             group: store.selectedGroupKey.flatMap(store.group(key:))
-                ?? (targets.count == 1 ? store.group(key: targets[0].groupKey ?? SessionGroup.key(targets[0].hostName, "default")) : nil),
+                ?? (targets.count == 1 ? targets[0].groupKey.flatMap(store.group(key:)) : nil),
             focusedGroup: store.focusedGroup,
             paneCount: pane?.tree.shownLeaves.count ?? 0, showsScreen: pane?.shown != nil,
             speechOn: speech.isEnabled, speaking: speech.isSpeaking, agentRemoteControl: AgentRemoteControlSetting.isOn,
@@ -1232,6 +1245,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             store.clearMarks()
         case .focusGroup(let key): store.focusGroup(key)
         case .archiveGroup(let key): archiveGroup(key)
+        case .moveToNoGroup(let sessions):
+            store.moveToNoGroup(sessions.map(\.id))
+            store.clearMarks()
         case .split(let direction, let how):
             switch how {
             case .terminal: splitPane(direction)

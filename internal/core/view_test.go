@@ -8,17 +8,16 @@ import (
 )
 
 func fixtureView() ([]*Session, []*Group) {
-	def := &Group{ID: "default", Name: "Default", IsDefault: true, SortKey: 1000000}
 	proj := &Group{ID: "g1", Name: "PROJ-123 auth", SortKey: 10, CreatedAt: at(1)}
 	bill := &Group{ID: "g2", Name: "billing", SortKey: 20, CreatedAt: at(2)}
 	ss := []*Session{
 		{ID: "a", Name: "refactor middleware", GroupID: "g1", Cwd: "/w/api-server", Status: StatusBusy, CreatedAt: at(1), LastEventAt: at(50)},
 		{ID: "b", Name: "fix flaky e2e", GroupID: "g1", Cwd: "/w/web", Status: StatusWaiting, CreatedAt: at(2), LastEventAt: at(10)},
-		{ID: "c", Name: "docs: hooks", GroupID: "default", Cwd: "/w/cli-tool", Status: StatusDone, CreatedAt: at(3), LastEventAt: at(30)},
+		{ID: "c", Name: "docs: hooks", Cwd: "/w/cli-tool", Status: StatusDone, CreatedAt: at(3), LastEventAt: at(30)},
 		{ID: "d", Name: "invoice export", GroupID: "g2", Cwd: "/w/billing", Status: StatusDone, Unseen: true, CreatedAt: at(4), LastEventAt: at(40)},
-		{ID: "e", Name: "old spike", GroupID: "default", Cwd: "/w/scratch", Status: StatusArchived, CreatedAt: at(5)},
+		{ID: "e", Name: "old spike", Cwd: "/w/scratch", Status: StatusArchived, CreatedAt: at(5)},
 	}
-	return ss, []*Group{def, bill, proj}
+	return ss, []*Group{bill, proj} // c and e are in no group
 }
 
 // render turns rows into a compact string: headers as [Name n urgent], sessions as #N:id.
@@ -26,7 +25,7 @@ func render(rows []Row) string {
 	var parts []string
 	for _, r := range rows {
 		if r.IsHeader() {
-			h := "[" + r.Group.Name
+			h := "[" + r.Title()
 			if r.Collapsed {
 				h += " +"
 			}
@@ -63,6 +62,7 @@ func TestLayoutListView(t *testing.T) {
 		{ViewState{Mode: "list", Filter: "billing"}, "1:d"},    // matches group name and cwd
 		{ViewState{Mode: "list", Filter: "nothing-matches"}, ""},
 		{ViewState{Mode: "list", Filter: "g: hooks"}, "1:c"}, // empty g: ignored
+		{ViewState{Mode: "list", Filter: "g:no"}, "1:c"},     // sessions in no group
 	}
 	for _, tt := range tests {
 		if got := render(Layout(ss, gs, tt.vs)); got != tt.want {
@@ -74,7 +74,7 @@ func TestLayoutListView(t *testing.T) {
 func TestLayoutGroupView(t *testing.T) {
 	ss, gs := fixtureView()
 	rows := Layout(ss, gs, ViewState{Mode: "groups", Sort: "created"})
-	if got := render(rows); got != "[PROJ-123 auth] 1:a 2:b [billing] 3:d [Default] 4:c" {
+	if got := render(rows); got != "[PROJ-123 auth] 1:a 2:b [billing] 3:d [No group] 4:c" {
 		t.Errorf("group view: %s", got)
 	}
 	h := rows[0]
@@ -83,9 +83,9 @@ func TestLayoutGroupView(t *testing.T) {
 	}
 
 	// Collapsed group: header shows count + most urgent status, sessions get no number.
-	gs[2].Collapsed = true
+	gs[1].Collapsed = true
 	rows = Layout(ss, gs, ViewState{Mode: "groups"})
-	if got := render(rows); got != "[PROJ-123 auth +] [billing] 1:d [Default] 2:c" {
+	if got := render(rows); got != "[PROJ-123 auth +] [billing] 1:d [No group] 2:c" {
 		t.Errorf("collapsed: %s", got)
 	}
 	if rows[0].Urgent != StatusWaiting || rows[0].Count != 2 {
@@ -96,32 +96,42 @@ func TestLayoutGroupView(t *testing.T) {
 	if got := render(Layout(ss, gs, ViewState{Mode: "groups", Filter: "flaky"})); got != "[PROJ-123 auth] 1:b" {
 		t.Errorf("filtered: %s", got)
 	}
-	gs[2].Collapsed = false
+	gs[1].Collapsed = false
 
-	// Empty groups show without a filter.
+	// Empty groups show without a filter; "No group" shows only with sessions in it.
 	empty := &Group{ID: "g3", Name: "empty", SortKey: 30}
-	if got := render(Layout(ss, append(gs, empty), ViewState{Mode: "groups"})); !strings.Contains(got, "[empty] [Default]") {
+	if got := render(Layout(ss, append(gs, empty), ViewState{Mode: "groups"})); !strings.Contains(got, "[empty] [No group]") {
 		t.Errorf("empty group hidden: %s", got)
 	}
+	if got := render(Layout(ss[:2], gs, ViewState{Mode: "groups"})); strings.Contains(got, "No group") {
+		t.Errorf("an empty No group shows: %s", got)
+	}
 
-	// Archived groups are hidden; their sessions fall back to Default only if shown.
+	// A "No group" header isn't a group, and never collapses.
+	rows = Layout(ss, gs, ViewState{Mode: "groups", Collapsed: []string{""}})
+	if last := rows[len(rows)-2]; last.Group != nil || last.Collapsed || last.Title() != NoGroupTitle || last.Count != 1 {
+		t.Errorf("No group header: %+v", last)
+	}
+
+	// Archived groups are hidden; their sessions show in no group.
 	arch := &Group{ID: "g2", Name: "billing", ArchivedAt: at(9)}
-	if got := render(Layout(ss, []*Group{gs[0], arch, gs[2]}, ViewState{Mode: "groups"})); got != "[PROJ-123 auth] 1:a 2:b [Default] 3:c 4:d" {
+	if got := render(Layout(ss, []*Group{arch, gs[1]}, ViewState{Mode: "groups"})); got != "[PROJ-123 auth] 1:a 2:b [No group] 3:c 4:d" {
 		t.Errorf("archived group: %s", got)
 	}
 }
 
-func TestLayoutOnlyDefaultHasNoHeaders(t *testing.T) {
+func TestLayoutWithoutGroupsHasNoHeaders(t *testing.T) {
 	ss, _ := fixtureView()
 	for _, s := range ss {
-		s.GroupID = "default"
+		s.GroupID = ""
 	}
-	if got := render(Layout(ss, []*Group{{ID: "default", Name: "Default", IsDefault: true}}, ViewState{Mode: "groups"})); got != "1:a 2:b 3:c 4:d" {
-		t.Errorf("only Default: %s", got)
-	}
-	// No groups passed at all (and unknown group ids) still work.
-	if got := render(Layout(ss[:1], nil, ViewState{Mode: "groups"})); got != "1:a" {
+	if got := render(Layout(ss, nil, ViewState{Mode: "groups"})); got != "1:a 2:b 3:c 4:d" {
 		t.Errorf("no groups: %s", got)
+	}
+	// An unknown group id is no group.
+	ss[0].GroupID = "gone"
+	if got := render(Layout(ss[:1], nil, ViewState{Mode: "groups"})); got != "1:a" {
+		t.Errorf("unknown group: %s", got)
 	}
 }
 
@@ -226,10 +236,10 @@ func TestAttention(t *testing.T) {
 	}
 }
 func TestViewCollapsesGroupsByID(t *testing.T) {
-	groups := []*Group{{ID: "default", Name: "Default", IsDefault: true}, {ID: "g", Name: "G", SortKey: 1}}
-	ss := []*Session{{ID: "a", GroupID: "g"}, {ID: "b", GroupID: "default"}}
+	groups := []*Group{{ID: "g", Name: "G", SortKey: 1}}
+	ss := []*Session{{ID: "a", GroupID: "g"}, {ID: "b"}}
 	rows := Layout(ss, groups, ViewState{Mode: "groups", Collapsed: []string{"g"}})
-	if !rows[0].Collapsed || rows[1].Group.ID != "default" || rows[2].Session.ID != "b" || rows[2].Number != 1 {
+	if !rows[0].Collapsed || rows[1].Group != nil || rows[2].Session.ID != "b" || rows[2].Number != 1 {
 		t.Errorf("collapsed by the view: %+v", rows)
 	}
 }

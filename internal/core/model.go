@@ -194,7 +194,6 @@ type Group struct {
 	// Collapsed is the CLI's view of the group; clients get it in
 	// ViewState.Collapsed, not with the group.
 	Collapsed  bool `json:"-"`
-	IsDefault  bool
 	CreatedAt  time.Time
 	ArchivedAt time.Time
 }

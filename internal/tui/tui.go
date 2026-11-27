@@ -321,7 +321,7 @@ func (m *Model) build() {
 				if r.Count == 0 {
 					continue
 				}
-				m.rows = append(m.rows, row{group: fmt.Sprintf("%s (%d)", r.Group.Name, r.Count), host: host})
+				m.rows = append(m.rows, row{group: fmt.Sprintf("%s (%d)", r.Title(), r.Count), host: host})
 				continue
 			}
 			m.rows = append(m.rows, row{host: host, s: r.Session, waiting: waiting[[2]string{host, r.Session.ID}]})

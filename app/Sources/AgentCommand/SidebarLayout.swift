@@ -80,22 +80,40 @@ nonisolated struct GroupHeader: Equatable {
     let collapsed: Bool
 }
 
-/// A group in the sidebar's Archived section, with its archived sessions.
+/// The quiet line over a host's sessions in no group. It isn't a group: it has
+/// no menu, colour or collapse, and the cursor passes it by.
+nonisolated struct NoGroupHeader: Equatable {
+    /// "" for this Mac.
+    let host: String
+    let count: Int
+
+    var title: String { SessionGroup.noGroupTitle(host: host) }
+    /// What dropping sessions on it names: no group, on its host.
+    var dropKey: String { SidebarLayout.noGroupKey(host) }
+}
+
+/// A group in the sidebar's Archived section, or no group, with its archived sessions.
 nonisolated struct ArchivedSection: Equatable, Identifiable {
-    let group: SessionGroup
+    /// nil: sessions in no group.
+    let group: SessionGroup?
+    /// The host of the sessions in no group ("" for this Mac).
+    var host = ""
     let sessions: [Session]
 
-    var id: String { group.key }
+    var id: String { group?.key ?? SidebarLayout.noGroupKey(host) }
+    var title: String { group?.title ?? SessionGroup.noGroupTitle(host: host) }
 }
 
 /// One line of the sidebar.
 nonisolated enum SidebarRow: Equatable, Identifiable {
     case header(GroupHeader)
+    case noGroup(NoGroupHeader)
     case session(Session, link: SetLink)
 
     var id: String {
         switch self {
         case .header(let header): "group:" + header.group.key
+        case .noGroup(let header): header.dropKey
         case .session(let session, _): session.id
         }
     }
@@ -109,47 +127,65 @@ nonisolated enum SidebarRow: Equatable, Identifiable {
 /// Lays out the sidebar from the daemon's structure and this app's options. It
 /// has no dependencies, so it can be checked on its own.
 enum SidebarLayout {
-    /// The rows: group headers (in group view, once there's a group besides
-    /// Default) and the listed sessions, sorted, with each set's together in its
-    /// order. A collapsed group shows only its header. While filtering, groups
-    /// with nothing listed are left out.
+    /// The rows: in group view, once there's a group or a host, each machine's
+    /// group headers, then a quiet "No group" line over its sessions in no
+    /// group. This Mac first, then each host. The listed sessions are sorted,
+    /// with each set's together in its order. A collapsed group shows only its
+    /// header. While filtering, groups with nothing listed are left out.
     static func rows(sessions: [Session], groups: [SessionGroup], sets: [[String]], options: SidebarOptions,
                      filtering: Bool = false) -> [SidebarRow] {
         let sorted = sort(sessions, by: options.sort, descending: options.descending)
         let ordered = orderedGroups(groups)
-        let hasGroups = ordered.contains { !$0.isDefault || !$0.host.isEmpty }
-        guard options.mode == .groups, hasGroups else { return sessionRows(sorted, sets: sets) }
+        let hosts = machines(sorted.map(\.hostName) + ordered.map(\.host))
+        guard options.mode == .groups, !ordered.isEmpty || hosts.count > 1 else { return sessionRows(sorted, sets: sets) }
 
-        // Each session in its group, on its own host: a host's sessions stay in
-        // the host's groups, and one whose group isn't known goes to its host's
-        // Default.
-        // Groups by key: every host's Default is "default".
+        // Each session in its group, on its own host. One whose group isn't
+        // known is in no group.
         let known = Set(ordered.map(\.key))
-        var defaults: [String: String] = [:]
-        for group in ordered where group.isDefault { defaults[group.host] = group.key }
         var byGroup: [String: [Session]] = [:]
         for session in sorted {
-            let fallback = defaults[session.hostName] ?? SessionGroup.key(session.hostName, "default")
-            let group = session.groupKey.flatMap { known.contains($0) ? $0 : nil } ?? fallback
-            byGroup[group, default: []].append(session)
+            let key = session.groupKey.flatMap { known.contains($0) ? $0 : nil } ?? noGroupKey(session.hostName)
+            byGroup[key, default: []].append(session)
         }
         var rows: [SidebarRow] = []
-        for group in ordered {
-            let members = byGroup[group.key] ?? []
-            if filtering && members.isEmpty { continue }
-            if group.isDefault && members.isEmpty { continue }
-            let collapsed = options.collapsed.contains(group.key) && !filtering
-            rows.append(.header(GroupHeader(group: group, count: members.count, urgent: mostUrgent(members), collapsed: collapsed)))
-            if !collapsed { rows += sessionRows(members, sets: sets) }
+        for host in hosts {
+            for group in ordered where group.host == host {
+                let members = byGroup[group.key] ?? []
+                if filtering && members.isEmpty { continue }
+                let collapsed = options.collapsed.contains(group.key) && !filtering
+                rows.append(.header(GroupHeader(group: group, count: members.count, urgent: mostUrgent(members), collapsed: collapsed)))
+                if !collapsed { rows += sessionRows(members, sets: sets) }
+            }
+            if let loose = byGroup[noGroupKey(host)], !loose.isEmpty {
+                rows.append(.noGroup(NoGroupHeader(host: host, count: loose.count)))
+                rows += sessionRows(loose, sets: sets)
+            }
         }
         return rows
     }
+
+    /// The machines, this Mac ("") first, then each host by name.
+    private static func machines(_ names: [String]) -> [String] {
+        Array(Set(names)).sorted { a, b in a.isEmpty || (!b.isEmpty && a < b) }
+    }
+
+    /// The key that names no group on a host, for drops and the Archived section.
+    nonisolated static func noGroupKey(_ host: String) -> String { "nogroup:" + host }
+
+    /// The host whose no group key this is, if it's one.
+    nonisolated static func noGroupHost(_ key: String) -> String? { key.hasPrefix("nogroup:") ? String(key.dropFirst(8)) : nil }
 
     /// The sessions you can see, top to bottom: what ⌘1-9 go by.
     static func sessionIDs(_ rows: [SidebarRow]) -> [String] { rows.compactMap(\.session?.id) }
 
     /// What the cursor stops on, top to bottom: group headers and sessions.
-    static func cursorIDs(_ rows: [SidebarRow]) -> [String] { rows.map(\.id) }
+    /// It passes "No group" by: there's nothing to do on it.
+    static func cursorIDs(_ rows: [SidebarRow]) -> [String] {
+        rows.compactMap { row in
+            if case .noGroup = row { return nil }
+            return row.id
+        }
+    }
 
     /// The cursor's id for a group's header.
     static func headerID(_ key: String) -> String { "group:" + key }
@@ -158,32 +194,40 @@ enum SidebarLayout {
     static func groupKey(cursor id: String) -> String? { id.hasPrefix("group:") ? String(id.dropFirst(6)) : nil }
 
     /// The group ⌘N starts a session in: the group you selected, else the
-    /// selected session's, else the one you focused. nil is this Mac's Default.
+    /// selected session's (a session in no group means no group), else the one
+    /// you focused. nil is no group.
     static func newSessionGroup(selectedGroup: String?, selected: Session?, focused: String?,
                                 groups: [SessionGroup]) -> SessionGroup? {
         let live = orderedGroups(groups)
-        for key in [selectedGroup, selected?.groupKey ?? selected.map { SessionGroup.key($0.hostName, "default") }, focused] {
-            if let key, let group = live.first(where: { $0.key == key }) { return group }
-        }
-        return nil
+        func group(_ key: String?) -> SessionGroup? { key.flatMap { key in live.first { $0.key == key } } }
+        if let found = group(selectedGroup) { return found }
+        if let selected { return group(selected.groupKey) }
+        return group(focused)
     }
 
-    /// The Archived section: each group with archived sessions, or archived
-    /// itself, in the groups' order, live or archived. One whose group isn't
-    /// known goes to its host's Default. Sessions are oldest first.
+    /// The Archived section: each machine's groups with archived sessions, or
+    /// archived themselves, in the groups' order, live or archived; then its
+    /// archived sessions in no group. One whose group isn't known is in no
+    /// group. Sessions are oldest first.
     static func archivedSections(sessions: [Session], groups: [SessionGroup]) -> [ArchivedSection] {
         let ordered = groups.sorted(by: inOrder)
         let known = Set(ordered.map(\.key))
         var byGroup: [String: [Session]] = [:]
         for session in sessions.sorted(by: { $0.id < $1.id }) {
-            let fallback = SessionGroup.key(session.hostName, "default")
-            let key = session.groupKey.flatMap { known.contains($0) ? $0 : nil } ?? fallback
+            let key = session.groupKey.flatMap { known.contains($0) ? $0 : nil } ?? noGroupKey(session.hostName)
             byGroup[key, default: []].append(session)
         }
-        return ordered.compactMap { group in
-            let members = byGroup[group.key] ?? []
-            return members.isEmpty && !group.isArchived ? nil : ArchivedSection(group: group, sessions: members)
+        var out: [ArchivedSection] = []
+        for host in machines(sessions.map(\.hostName) + ordered.map(\.host)) {
+            for group in ordered where group.host == host {
+                let members = byGroup[group.key] ?? []
+                if !members.isEmpty || group.isArchived { out.append(ArchivedSection(group: group, sessions: members)) }
+            }
+            if let loose = byGroup[noGroupKey(host)], !loose.isEmpty {
+                out.append(ArchivedSection(group: nil, host: host, sessions: loose))
+            }
         }
+        return out
     }
 
     private static func sessionRows(_ sessions: [Session], sets: [[String]]) -> [SidebarRow] {
@@ -193,15 +237,14 @@ enum SidebarLayout {
         }
     }
 
-    /// Live groups in the order you arranged them, Default last: this Mac's,
-    /// then each host's, as the host arranges them.
+    /// Live groups in the order you arranged them: this Mac's, then each
+    /// host's, as the host arranges them.
     static func orderedGroups(_ groups: [SessionGroup]) -> [SessionGroup] {
         groups.filter { !$0.isArchived }.sorted(by: inOrder)
     }
 
     private static func inOrder(_ a: SessionGroup, _ b: SessionGroup) -> Bool {
         if a.host != b.host { return a.host.isEmpty || (!b.host.isEmpty && a.host < b.host) }
-        if a.isDefault != b.isDefault { return !a.isDefault }
         return (a.order, a.id) < (b.order, b.id)
     }
 
@@ -270,11 +313,12 @@ enum SidebarDrop: Equatable {
     static func sessionItem(_ id: String) -> String { "session:" + id }
     static func groupItem(_ id: String) -> String { "group:" + id }
 
-    /// The change a drop onto group target asks for. A dragged session that's
-    /// marked takes every marked session with it. A group dropped on another
-    /// goes before it; on Default, after the last group. Anything else is nothing.
-    /// Groups are named by key (SessionGroup.key), and a group moves only
-    /// among its own host's.
+    /// The change a drop onto target asks for: a group's key, or a host's no
+    /// group (SidebarLayout.noGroupKey). A dragged session that's marked takes
+    /// every marked session with it; on no group, they leave their group. A
+    /// group dropped on another goes before it; on its host's "No group" line,
+    /// after its host's last group. Anything else is nothing. A group moves
+    /// only among its own host's.
     static func action(items: [String], onto target: String, groups: [SessionGroup], marked: Set<String> = []) -> SidebarDrop? {
         guard let item = items.first else { return nil }
         if item.hasPrefix("session:") {
@@ -285,12 +329,12 @@ enum SidebarDrop: Equatable {
         guard item.hasPrefix("group:") else { return nil }
         let key = String(item.dropFirst(6))
         let ordered = SidebarLayout.orderedGroups(groups)
-        guard key != target, let dragged = ordered.first(where: { $0.key == key }), !dragged.isDefault,
-              let onto = ordered.first(where: { $0.key == target }), onto.host == dragged.host else { return nil }
-        if onto.isDefault {
-            guard let last = ordered.last(where: { !$0.isDefault && $0.host == dragged.host }), last.key != key else { return nil }
+        guard key != target, let dragged = ordered.first(where: { $0.key == key }) else { return nil }
+        if let host = SidebarLayout.noGroupHost(target) {
+            guard host == dragged.host, let last = ordered.last(where: { $0.host == host }), last.key != key else { return nil }
             return .moveGroup(key, before: nil, after: last.key)
         }
+        guard let onto = ordered.first(where: { $0.key == target }), onto.host == dragged.host else { return nil }
         return .moveGroup(key, before: target, after: nil)
     }
 }

@@ -16,11 +16,10 @@ func TestBuildSidebarAndFinders(t *testing.T) {
 	snap := ipc.Snapshot{
 		Groups: []*ipc.Group{
 			{ID: "g1", Name: "Work", Order: 1},
-			{ID: "default", Name: "Default", IsDefault: true},
 		},
 		Sessions: []*ipc.Session{
 			{ID: "s1", Name: "api", GroupID: "g1", Status: core.StatusRunning},
-			{ID: "s2", Name: "docs", GroupID: "default", Status: core.StatusWaiting},
+			{ID: "s2", Name: "docs", Status: core.StatusWaiting},
 		},
 		Harnesses: []ipc.Harness{
 			{ID: "h1", Name: "Claude Work", Kind: core.HarnessClaude, Title: "Claude", Installed: true},
