@@ -90,6 +90,7 @@ func TestFoldersMakeTheirPathAndStartSessionsThere(t *testing.T) {
 func TestAFoldersPathCanStartAtHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows' home
 	if got, err := makeFolder("~/work/api"); err != nil || got != filepath.Join(home, "work", "api") {
 		t.Errorf("~/: %q %v", got, err)
 	}
