@@ -100,6 +100,25 @@
         [Environment]::SetEnvironmentVariable('ACMD_INSTALL_PATH_CHANGED', $null, 'User')
     }
 
+    # Get-FileHash and Expand-Archive are script modules in Windows PowerShell,
+    # and don't load when it's started from PowerShell 7 (its PSModulePath
+    # carries over). .NET does the same work in both.
+    function Get-Sha256([string]$Path) {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        $stream = [IO.File]::OpenRead($Path)
+        try {
+            -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })
+        } finally {
+            $stream.Dispose()
+            $sha.Dispose()
+        }
+    }
+
+    function Expand-Zip([string]$Zip, [string]$To) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($Zip, $To)
+    }
+
     function Test-Attestation([string]$Zip, [string]$Name) {
         if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
         if ((Invoke-Program gh @('auth', 'status') -Quiet) -ne 0) { return }
@@ -161,7 +180,7 @@
             $zip = Join-Path $tmp $file
             $url = "$releases/download/agent-command-v$version/$file"
             try { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip } catch { Fail "couldn't download ${url}: $($_.Exception.Message)" }
-            $got = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+            $got = Get-Sha256 $zip
             if ($got -ne $sum) { Fail "$file's SHA-256 is $got, but the release says $sum" }
             Test-Attestation $zip $file
 
@@ -170,7 +189,7 @@
             New-Item -ItemType Directory -Force $root | Out-Null
             $unpack = Join-Path $root ".unpack-$PID"
             if (Test-Path $unpack) { Remove-Item -Recurse -Force $unpack }
-            Expand-Archive -Path $zip -DestinationPath $unpack
+            Expand-Zip $zip $unpack
             foreach ($exe in 'acmd.exe', 'acmdw.exe') {
                 if (-not (Test-Path (Join-Path $unpack $exe))) { Fail "$file has no $exe" }
             }

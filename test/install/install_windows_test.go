@@ -10,8 +10,27 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
+
+// longPath is p with any 8.3 short names spelled out, so two spellings of
+// one folder compare equal. A temp folder can have one (C:\Users\RUNNER~1),
+// while a junction keeps the long name. It doesn't follow junctions.
+func longPath(t *testing.T, p string) string {
+	t.Helper()
+	p = filepath.Clean(strings.TrimPrefix(p, `\\?\`))
+	in, err := windows.UTF16PtrFromString(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetLongPathName(in, &buf[0], uint32(len(buf)))
+	if err != nil || n == 0 || int(n) > len(buf) {
+		return strings.ToLower(p) // it doesn't exist (any more)
+	}
+	return strings.ToLower(windows.UTF16ToString(buf[:n]))
+}
 
 // shells are the PowerShells to run install.ps1 in: Windows PowerShell 5.1,
 // which every Windows has, and PowerShell 7 where it's installed.
@@ -157,8 +176,7 @@ func (s *winSandbox) pointsAt(version string) {
 	if err != nil {
 		s.t.Fatalf("current isn't a junction: %v", err)
 	}
-	target = filepath.Clean(strings.TrimPrefix(target, `\\?\`))
-	if want := s.root(version); !strings.EqualFold(target, want) {
+	if want := s.root(version); longPath(s.t, target) != longPath(s.t, want) {
 		s.t.Fatalf("current points at %s, not %s", target, want)
 	}
 	for _, exe := range []string{"acmd.exe", "acmdw.exe"} {
@@ -174,7 +192,7 @@ func (s *winSandbox) pointsAt(version string) {
 
 func (s *winSandbox) onUserPath() bool {
 	for _, p := range userPath(s.t) {
-		if strings.EqualFold(p, s.root("current")) {
+		if p != "" && longPath(s.t, p) == longPath(s.t, s.root("current")) {
 			return true
 		}
 	}
@@ -195,9 +213,12 @@ func TestPs1InstallsTheLatest(t *testing.T) {
 			// acmd sees itself in current, as under Scoop, so the logon task
 			// and the hooks name the path that upgrades keep.
 			got := logLines(t, s.log)
-			if len(got) != 1 || !strings.HasPrefix(got[0], "0.2.0 init ") ||
-				!strings.HasSuffix(strings.ToLower(got[0]), strings.ToLower(" exe="+s.root("current", "acmd.exe"))) {
-				t.Fatalf("acmd ran as %q, want init, from %s", got, s.root("current", "acmd.exe"))
+			if len(got) != 1 || !strings.HasPrefix(got[0], "0.2.0 init ") {
+				t.Fatalf("acmd ran as %q, want one init", got)
+			}
+			_, exe, _ := strings.Cut(got[0], " exe=")
+			if want := s.root("current", "acmd.exe"); longPath(t, exe) != longPath(t, want) {
+				t.Fatalf("acmd ran as %s, not %s", exe, want)
 			}
 		})
 	}
@@ -214,7 +235,13 @@ func TestPs1UpgradesAndRemovesTheOldVersion(t *testing.T) {
 			mustContain(t, out, "upgraded acmd from 0.1.0 to 0.2.0")
 			s.pointsAt("0.2.0")
 			notExist(t, s.root("0.1.0"))
-			if n := strings.Count(strings.Join(userPath(t), ";"), s.root("current")); n != 1 {
+			n := 0
+			for _, p := range userPath(t) {
+				if p != "" && longPath(t, p) == longPath(t, s.root("current")) {
+					n++
+				}
+			}
+			if n != 1 {
 				t.Fatalf("current is on the user's PATH %d times, want once", n)
 			}
 		})
