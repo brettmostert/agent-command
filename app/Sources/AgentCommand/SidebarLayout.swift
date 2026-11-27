@@ -28,6 +28,33 @@ nonisolated struct SidebarOptions: Codable, Equatable {
     var descending = false
     /// The groups collapsed to their header.
     var collapsed: Set<String> = []
+    /// The group you focused: the others are collapsed. nil: none is.
+    var focused: String?
+    /// What was collapsed before you focused a group, to bring back after.
+    var beforeFocus: Set<String>?
+
+    /// Focuses a group: it's open, and the other groups are collapsed. Focusing
+    /// another keeps what was collapsed before the first.
+    mutating func focus(_ key: String, groups: [SessionGroup]) {
+        if focused == nil { beforeFocus = collapsed }
+        focused = key
+        mode = .groups
+        collapsed = Set(groups.map(\.key)).subtracting([key])
+    }
+
+    /// Leaves focus, bringing back what was collapsed before. Groups made while
+    /// focused were open before, so they open.
+    mutating func clearFocus() {
+        guard focused != nil else { return }
+        collapsed = beforeFocus ?? []
+        focused = nil
+        beforeFocus = nil
+    }
+
+    /// Leaves focus when the focused group is gone: deleted, or archived.
+    mutating func keepFocus(among live: [SessionGroup]) {
+        if let focused, !live.contains(where: { $0.key == focused }) { clearFocus() }
+    }
 
     static let key = "sidebarView"
 
@@ -51,6 +78,14 @@ nonisolated struct GroupHeader: Equatable {
     /// What in it needs you most, shown while it's collapsed.
     let urgent: SessionAttention?
     let collapsed: Bool
+}
+
+/// A group in the sidebar's Archived section, with its archived sessions.
+nonisolated struct ArchivedSection: Equatable, Identifiable {
+    let group: SessionGroup
+    let sessions: [Session]
+
+    var id: String { group.key }
 }
 
 /// One line of the sidebar.
@@ -110,8 +145,46 @@ enum SidebarLayout {
         return rows
     }
 
-    /// The sessions you can see, top to bottom: what ⌘1-9 and the cursor go by.
+    /// The sessions you can see, top to bottom: what ⌘1-9 go by.
     static func sessionIDs(_ rows: [SidebarRow]) -> [String] { rows.compactMap(\.session?.id) }
+
+    /// What the cursor stops on, top to bottom: group headers and sessions.
+    static func cursorIDs(_ rows: [SidebarRow]) -> [String] { rows.map(\.id) }
+
+    /// The cursor's id for a group's header.
+    static func headerID(_ key: String) -> String { "group:" + key }
+
+    /// The group whose header has this cursor id, if it's a header's.
+    static func groupKey(cursor id: String) -> String? { id.hasPrefix("group:") ? String(id.dropFirst(6)) : nil }
+
+    /// The group ⌘N starts a session in: the group you selected, else the
+    /// selected session's, else the one you focused. nil is this Mac's Default.
+    static func newSessionGroup(selectedGroup: String?, selected: Session?, focused: String?,
+                                groups: [SessionGroup]) -> SessionGroup? {
+        let live = orderedGroups(groups)
+        for key in [selectedGroup, selected?.groupKey ?? selected.map { SessionGroup.key($0.hostName, "default") }, focused] {
+            if let key, let group = live.first(where: { $0.key == key }) { return group }
+        }
+        return nil
+    }
+
+    /// The Archived section: each group with archived sessions, or archived
+    /// itself, in the groups' order, live or archived. One whose group isn't
+    /// known goes to its host's Default. Sessions are oldest first.
+    static func archivedSections(sessions: [Session], groups: [SessionGroup]) -> [ArchivedSection] {
+        let ordered = groups.sorted(by: inOrder)
+        let known = Set(ordered.map(\.key))
+        var byGroup: [String: [Session]] = [:]
+        for session in sessions.sorted(by: { $0.id < $1.id }) {
+            let fallback = SessionGroup.key(session.hostName, "default")
+            let key = session.groupKey.flatMap { known.contains($0) ? $0 : nil } ?? fallback
+            byGroup[key, default: []].append(session)
+        }
+        return ordered.compactMap { group in
+            let members = byGroup[group.key] ?? []
+            return members.isEmpty && !group.isArchived ? nil : ArchivedSection(group: group, sessions: members)
+        }
+    }
 
     private static func sessionRows(_ sessions: [Session], sets: [[String]]) -> [SidebarRow] {
         let byID = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -123,11 +196,13 @@ enum SidebarLayout {
     /// Live groups in the order you arranged them, Default last: this Mac's,
     /// then each host's, as the host arranges them.
     static func orderedGroups(_ groups: [SessionGroup]) -> [SessionGroup] {
-        groups.filter { !$0.isArchived }.sorted { a, b in
-            if a.host != b.host { return a.host.isEmpty || (!b.host.isEmpty && a.host < b.host) }
-            if a.isDefault != b.isDefault { return !a.isDefault }
-            return (a.order, a.id) < (b.order, b.id)
-        }
+        groups.filter { !$0.isArchived }.sorted(by: inOrder)
+    }
+
+    private static func inOrder(_ a: SessionGroup, _ b: SessionGroup) -> Bool {
+        if a.host != b.host { return a.host.isEmpty || (!b.host.isEmpty && a.host < b.host) }
+        if a.isDefault != b.isDefault { return !a.isDefault }
+        return (a.order, a.id) < (b.order, b.id)
     }
 
     /// The groups a session can be moved to: its own host's.

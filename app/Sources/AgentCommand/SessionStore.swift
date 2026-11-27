@@ -10,9 +10,14 @@ final class SessionStore {
     private(set) var archived: [Session] = []
     var selectedID: String? {
         didSet {
-            if selectedID != oldValue && !reflecting { onSelect?(selected) }
+            guard selectedID != oldValue, !reflecting else { return }
+            // Selecting a session makes its group what ⌘N starts in.
+            selectedGroupKey = nil
+            onSelect?(selected)
         }
     }
+    /// The group whose header you selected in the sidebar, by key: ⌘N starts in it.
+    private(set) var selectedGroupKey: String?
     @ObservationIgnored private var reflecting = false
     /// Sessions showing in panes, the selected one among them.
     private(set) var visibleIDs: Set<String> = []
@@ -35,6 +40,8 @@ final class SessionStore {
     var wake: WakeState?
     /// The groups sessions can go in, Default last.
     var groups: [SessionGroup] = []
+    /// Every group, archived ones too, for the Archived section.
+    private(set) var allGroups: [SessionGroup] = []
     /// Hosting, for Remote sessions; nil when the daemon has none.
     private(set) var remote: RemoteStatus?
     /// Called with Hosting's status, from each snapshot.
@@ -146,6 +153,32 @@ final class SessionStore {
         if options.collapsed.remove(groupID) == nil { options.collapsed.insert(groupID) }
     }
 
+    func setCollapsed(_ key: String, _ collapsed: Bool) {
+        if collapsed { options.collapsed.insert(key) } else { options.collapsed.remove(key) }
+    }
+
+    /// Selects a group's header: the cursor goes to it, and ⌘N starts in the group.
+    func selectGroup(_ key: String) {
+        selectedGroupKey = key
+        cursorID = SidebarLayout.headerID(key)
+    }
+
+    /// The group you focused, while it's live.
+    var focusedGroup: SessionGroup? { options.focused.flatMap { group(key: $0) } }
+
+    /// Opens one group and collapses the others, or (nil) brings back what was collapsed.
+    func focusGroup(_ key: String?) {
+        if let key { options.focus(key, groups: groups) } else { options.clearFocus() }
+    }
+
+    /// The group ⌘N starts a session in; nil is this Mac's Default.
+    var newSessionGroup: SessionGroup? {
+        SidebarLayout.newSessionGroup(selectedGroup: selectedGroupKey, selected: selected, focused: options.focused, groups: groups)
+    }
+
+    /// The Archived section, by group.
+    var archivedSections: [ArchivedSection] { SidebarLayout.archivedSections(sessions: archived, groups: allGroups) }
+
     /// The hosts the sidebar's filter offers.
     var filterHosts: [String] { SidebarFilter.hostNames(known: remoteHosts, sessions: sessions) }
 
@@ -163,11 +196,17 @@ final class SessionStore {
         guard focused != sidebarFocused else { return }
         sidebarFocused = focused
         markedIDs = []
-        if focused { cursorID = selectedID ?? sidebarIDs.first }
+        if focused { cursorID = selectedGroupKey.map(SidebarLayout.headerID) ?? selectedID ?? cursorIDs.first }
     }
 
+    /// What the cursor stops on: group headers and the sessions you can see.
+    var cursorIDs: [String] { SidebarLayout.cursorIDs(sidebarRows) }
+
+    /// Puts the cursor on a row. On a header, it selects the group; on a
+    /// session, the session's group is the context again.
     func setCursor(_ id: String) {
         cursorID = id
+        selectedGroupKey = SidebarLayout.groupKey(cursor: id)
     }
 
     /// The session numbered n, from 1, counting down the sidebar.
@@ -205,13 +244,13 @@ final class SessionStore {
     }
 
     func moveCursor(by step: Int) {
-        let ids = sidebarIDs
+        let ids = cursorIDs
         guard !ids.isEmpty else { return }
         guard let cursorID, let index = ids.firstIndex(of: cursorID) else {
-            self.cursorID = ids.first
+            setCursor(ids[0])
             return
         }
-        self.cursorID = ids[max(0, min(ids.count - 1, index + step))]
+        setCursor(ids[max(0, min(ids.count - 1, index + step))])
     }
 
     func toggleMarkAtCursor() {
@@ -517,8 +556,14 @@ final class SessionStore {
             let jobs = snapshot.jobs ?? []
             if jobs != self.jobs { self.jobs = jobs }
             if snapshot.wake != self.wake { self.wake = snapshot.wake }
-            let groups = (snapshot.groups ?? []).filter { !$0.isArchived }
-            if groups != self.groups { self.groups = groups }
+            let all = snapshot.groups ?? []
+            if all != self.allGroups { self.allGroups = all }
+            let groups = all.filter { !$0.isArchived }
+            if groups != self.groups {
+                self.groups = groups
+                self.options.keepFocus(among: groups)
+                if let key = self.selectedGroupKey, !groups.contains(where: { $0.key == key }) { self.selectedGroupKey = nil }
+            }
             if snapshot.remote != self.remote { self.remote = snapshot.remote }
             self.onRemote?(snapshot.remote)
             let hosts = snapshot.remoteHosts ?? []
@@ -606,12 +651,14 @@ final class SessionStore {
         var targets: [Target]?
         var after: String?
         var before: String?
+        var flag: Bool?
 
         init(kind: String, on host: String = "", group_id: String? = nil, text: String? = nil, color: String? = nil,
-             targets: [Target]? = nil, after: String? = nil, before: String? = nil) {
+             targets: [Target]? = nil, after: String? = nil, before: String? = nil, flag: Bool? = nil) {
             self.kind = kind
             self.host = host.isEmpty ? nil : host
             (self.group_id, self.text, self.color, self.targets, self.after, self.before) = (group_id, text, color, targets, after, before)
+            self.flag = flag
         }
     }
 
@@ -622,18 +669,36 @@ final class SessionStore {
     }
 
     /// Makes a group, and moves sessions into it (with their sets). It's made
-    /// on the sessions' host, which keeps its own groups.
-    func createGroup(_ name: String, moving ids: [String] = []) {
+    /// on the sessions' host, which keeps its own groups; with none, on host.
+    /// made gets the group once it's made.
+    func createGroup(_ name: String, moving ids: [String] = [], on host: String = "", made: @escaping (SessionGroup) -> Void = { _ in }) {
         let moving = targets(ids)
-        let host = moving.first?.host ?? ""
+        let host = moving.first?.host ?? host
         run(failure: "Couldn't make the group") { conn in
             let group: SessionGroup = try conn.call("mutate", GroupMutation(kind: "group.create", on: host, text: name))
             if !moving.isEmpty {
                 try conn.send("mutate", GroupMutation(kind: "session.move", on: host, group_id: group.id, targets: moving))
             }
             return group
-        } done: { _ in }
+        } done: { group in made(group) }
     }
+
+    /// Archives a group and its sessions; running ones stop.
+    func archiveGroup(_ key: String) {
+        guard let group = group(key: key), !group.isDefault else { return }
+        if selectedGroupKey == key { selectedGroupKey = nil }
+        mutateGroup(GroupMutation(kind: "group.archive", on: group.host, group_id: group.id), failure: "Couldn't archive the group")
+    }
+
+    /// Brings an archived group back, and with sessions its sessions too, paused.
+    func unarchiveGroup(_ key: String, sessions: Bool) {
+        guard let group = allGroups.first(where: { $0.key == key }), group.isArchived else { return }
+        mutateGroup(GroupMutation(kind: "group.unarchive", on: group.host, group_id: group.id, flag: sessions ? true : nil),
+                    failure: "Couldn't unarchive the group")
+    }
+
+    /// The sessions a group's archive takes: those in it now.
+    func members(ofGroup key: String) -> [Session] { sessions.filter { $0.groupKey == key } }
 
     /// The groups below are named by key (SessionGroup.key): their id on their host.
     func renameGroup(_ key: String, to name: String) {
@@ -710,7 +775,8 @@ final class SessionStore {
     /// remote makes it a Remote session or not; nil, as from ⌘N, is the config's
     /// `new_sessions_remote`.
     /// setWith puts it in a set with that session, for a split.
-    func newSession(harness: Harness, in folder: String, remote: Bool? = nil, setWith: String? = nil,
+    /// group is the id of the group it goes in; nil is Default.
+    func newSession(harness: Harness, in folder: String, remote: Bool? = nil, setWith: String? = nil, group: String? = nil,
                     placed: ((Session) -> Void)? = nil) {
         nonisolated struct New: Encodable {
             let cwd: String
@@ -718,10 +784,12 @@ final class SessionStore {
             let harness_kind: String
             let remote: Bool?
             let set_with: String?
+            let group_id: String?
         }
         let (id, kind) = harness.request
         run(failure: "Couldn't start the session") { conn in
-            let session: Session = try conn.call("new", New(cwd: folder, harness_id: id, harness_kind: kind, remote: remote, set_with: setWith))
+            let session: Session = try conn.call("new", New(cwd: folder, harness_id: id, harness_kind: kind, remote: remote, set_with: setWith,
+                                                            group_id: group))
             return session
         } done: { session in
             self.adopt(session)
@@ -756,9 +824,9 @@ final class SessionStore {
     /// Starts a session on a host, then shows it here. done gets why it couldn't, if it couldn't.
     /// setWith puts it in a set with that session from the same host, and placed
     /// then puts it in the panes instead of selecting it: a split.
-    func newRemoteSession(host: String, dir: String, harness: Harness?, setWith: String? = nil,
+    func newRemoteSession(host: String, dir: String, harness: Harness?, setWith: String? = nil, group: String? = nil,
                           placed: ((Session) -> Void)? = nil, done: @escaping (String?) -> Void = { _ in }) {
-        remoteClient.newSession(host: host, dir: dir, harness: harness?.request, setWith: setWith) { [weak self] result in
+        remoteClient.newSession(host: host, dir: dir, harness: harness?.request, setWith: setWith, group: group) { [weak self] result in
             switch result {
             case .success(let session):
                 if let placed {

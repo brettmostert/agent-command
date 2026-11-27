@@ -10,8 +10,9 @@ struct HarnessPickerView: View {
     /// Whether to offer the checkbox: there's no default yet.
     let offersDefault: Bool
     let close: () -> Void
-    /// The harness picked, whether to make it the default, and the host, if not this Mac.
-    let choose: (Harness, Bool, String?) -> Void
+    /// The harness picked, whether to make it the default, the host, if not this
+    /// Mac, and the group.
+    let choose: (Harness, Bool, String?, NewSessionGroup) -> Void
 
     @State private var picker: NewSessionPicker
     @State private var search = ""
@@ -19,7 +20,7 @@ struct HarnessPickerView: View {
     @State private var makeDefault = false
 
     init(title: String = "New session", offersDefault: Bool = false, picker: NewSessionPicker = NewSessionPicker(hosts: []),
-         close: @escaping () -> Void, choose: @escaping (Harness, Bool, String?) -> Void) {
+         close: @escaping () -> Void, choose: @escaping (Harness, Bool, String?, NewSessionGroup) -> Void) {
         self.title = title
         self.offersDefault = offersDefault
         self.close = close
@@ -41,7 +42,7 @@ struct HarnessPickerView: View {
     private var showsDefault: Bool { Self.showsDefault(offered: offersDefault, host: picker.host) }
 
     private func pick(_ harness: Harness) {
-        choose(harness, Self.makesDefault(harness, checked: makeDefault, offered: offersDefault, host: picker.host), picker.host)
+        choose(harness, Self.makesDefault(harness, checked: makeDefault, offered: offersDefault, host: picker.host), picker.host, picker.group)
     }
 
     private var theme: AppTheme { .shared }
@@ -51,17 +52,27 @@ struct HarnessPickerView: View {
         let list = choice.matches
         PopupBox(
             title: title,
-            placeholder: picker.hosts.isEmpty ? "Search, or press a number" : "Search, or press a number; tab changes where",
+            placeholder: picker.choosingGroup ? "Search the groups, or type a new one's name"
+                : picker.hosts.isEmpty ? "Search, or press a number" : "Search, or press a number; tab changes where",
             search: Binding(
-                get: { search },
+                get: { picker.choosingGroup ? picker.groupSearch : search },
                 set: { text in
+                    if picker.choosingGroup {
+                        picker.groupSearch = text
+                        return
+                    }
                     search = text
                     if let picked = picker.setSearch(text) { pick(picked) }
                 }),
-            close: close,
-            onMove: { picker.move($0) },
+            // Escape closes the group list first.
+            close: { if picker.choosingGroup { picker.toggleGroups() } else { close() } },
+            onMove: { if picker.choosingGroup { picker.moveGroupCursor($0) } else { picker.move($0) } },
             onSubmit: {
-                if let picked = picker.choice.chosen { pick(picked) }
+                if picker.choosingGroup {
+                    picker.pickGroupAtCursor()
+                } else if let picked = picker.choice.chosen {
+                    pick(picked)
+                }
             },
             onKey: { combo in
                 if combo == Self.toggleDefaultKey, showsDefault {
@@ -75,41 +86,95 @@ struct HarnessPickerView: View {
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 if !picker.hosts.isEmpty { whereLine }
-                if picker.loading {
-                    Text("Asking \(picker.host ?? "the host") what it can run…")
-                        .foregroundStyle(theme.dim)
-                        .padding(.horizontal, 24)
-                } else if let error = picker.error {
-                    Text(error)
-                        .foregroundStyle(theme.red)
-                        .padding(.horizontal, 24)
-                        .textSelection(.enabled)
-                } else if list.isEmpty {
-                    Text("No matching harness")
-                        .foregroundStyle(theme.dim)
-                        .padding(.horizontal, 24)
-                }
-                ForEach(list) { harness in
-                    row(harness, choice: choice, isSelected: harness == choice.chosen)
-                        .contentShape(Rectangle())
-                        .onHover { if $0 { picker.select(harness) } }
-                        .onTapGesture { pick(harness) }
-                }
-                if showsDefault {
-                    Toggle("Make it the default for ⌘N  (⌘D)", isOn: $makeDefault)
-                        .toggleStyle(.checkbox)
-                        .help("⌘N then starts it without asking. Change it in Settings → Harnesses.")
-                        .foregroundStyle(theme.dim)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
-                } else if picker.host != nil {
-                    Text("It runs on \(picker.host ?? ""), as a Remote session there, and shows here.")
-                        .foregroundStyle(theme.dim)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
+                if !picker.groups.isEmpty { groupLine }
+                if picker.choosingGroup {
+                    groupList
+                } else {
+                    harnessList(list, choice: choice)
                 }
             }
         }
+    }
+
+    @ViewBuilder private func harnessList(_ list: [Harness], choice: HarnessChoice) -> some View {
+        if picker.loading {
+            Text("Asking \(picker.host ?? "the host") what it can run…")
+                .foregroundStyle(theme.dim)
+                .padding(.horizontal, 24)
+        } else if let error = picker.error {
+            Text(error)
+                .foregroundStyle(theme.red)
+                .padding(.horizontal, 24)
+                .textSelection(.enabled)
+        } else if list.isEmpty {
+            Text("No matching harness")
+                .foregroundStyle(theme.dim)
+                .padding(.horizontal, 24)
+        }
+        ForEach(list) { harness in
+            row(harness, choice: choice, isSelected: harness == choice.chosen)
+                .contentShape(Rectangle())
+                .onHover { if $0 { picker.select(harness) } }
+                .onTapGesture { pick(harness) }
+        }
+        if showsDefault {
+            Toggle("Make it the default for ⌘N  (⌘D)", isOn: $makeDefault)
+                .toggleStyle(.checkbox)
+                .help("⌘N then starts it without asking. Change it in Settings → Harnesses.")
+                .foregroundStyle(theme.dim)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+        } else if picker.host != nil {
+            Text("It runs on \(picker.host ?? ""), as a Remote session there, and shows here.")
+                .foregroundStyle(theme.dim)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+        }
+    }
+
+    /// The group it goes in. ⌘G changes it.
+    private var groupLine: some View {
+        HStack(spacing: 4) {
+            Text("Group").foregroundStyle(theme.dim)
+            Text(picker.groupTitle)
+                .fontWeight(.bold)
+                .foregroundStyle(picker.groupColor.map { GroupHeaderRow.color($0, theme: theme) } ?? theme.fg)
+                .padding(.horizontal, 6)
+                .contentShape(Rectangle())
+                .onTapGesture { picker.toggleGroups() }
+            Spacer(minLength: 0)
+            Text(Self.groupKeyLabel).foregroundStyle(theme.dim)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 12)
+    }
+
+    static let groupKeyLabel = "⌘G"
+
+    /// The host's groups, and a new one.
+    private var groupList: some View {
+        let rows = picker.groupRows
+        return ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            let isSelected = index == picker.groupCursor
+            HStack {
+                Text(row.title)
+                    .fontWeight(isSelected ? .bold : .regular)
+                    .foregroundStyle(isSelected ? theme.bg : rowColor(row))
+                Spacer(minLength: 16)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 19)
+            .background(isSelected ? theme.yellow : Color.clear)
+            .padding(.horizontal, 16)
+            .contentShape(Rectangle())
+            .onTapGesture { picker.pickGroup(row) }
+        }
+    }
+
+    private func rowColor(_ row: NewSessionGroupRow) -> Color {
+        if case .group(let group) = row { return GroupHeaderRow.color(group.color, theme: theme) }
+        return theme.dim
     }
 
     /// Where it runs: this Mac, or a host. Tab, or left and right with nothing typed, move along it.

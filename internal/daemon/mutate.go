@@ -117,13 +117,7 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutFinish:
 		return nil, d.finish(ctx, m.LocalID)
 	case ipc.MutUnarchive:
-		return nil, d.updateSession(ctx, m.LocalID, func(s *core.Session) error {
-			if s.IsTerminal() {
-				return invalid("an archived terminal's shell has ended: start a new one")
-			}
-			core.Apply(s, core.Event{Kind: core.EventUnarchived, Time: d.eventTime(s)})
-			return nil
-		})
+		return nil, d.unarchive(ctx, m.LocalID)
 	case ipc.MutMove:
 		return nil, st.MoveSessions(ctx, m.GroupID, m.LocalIDs...)
 	case ipc.MutGroupCreate:
@@ -277,6 +271,33 @@ func (d *Daemon) recordArchived(ctx context.Context, st *store.Store, s *core.Se
 	}
 	return st.AppendEvent(ctx, store.LoggedEvent{SessionID: s.ID, ClaudeSessionID: s.ClaudeSessionID,
 		Kind: string(core.EventArchived), Detail: string(s.Status)})
+}
+
+// unarchive brings a session back, and its group with it if the group is
+// archived, so it never lands in a group no one sees.
+func (d *Daemon) unarchive(ctx context.Context, id string) error {
+	return d.store.WithTx(ctx, func(st *store.Store) error {
+		s, err := st.Session(ctx, id)
+		if err != nil {
+			return err
+		}
+		if s.IsTerminal() {
+			return invalid("an archived terminal's shell has ended: start a new one")
+		}
+		core.Apply(s, core.Event{Kind: core.EventUnarchived, Time: d.eventTime(s)})
+		if err := st.UpdateSession(ctx, s); err != nil {
+			return err
+		}
+		g, err := st.Group(ctx, s.GroupID)
+		if err != nil || g.ArchivedAt.IsZero() {
+			return err
+		}
+		err = st.SetGroupArchived(ctx, g.ID, false)
+		if errors.Is(err, store.ErrDuplicateName) {
+			return invalid("its group %q can't come back: another group has that name. Rename that one first", g.Name)
+		}
+		return err
+	})
 }
 
 // archiveGroup archives a group and its sessions, all or nothing. It checks

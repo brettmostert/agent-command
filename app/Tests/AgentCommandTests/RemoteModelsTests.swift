@@ -282,6 +282,52 @@ struct NewSessionPickerTests {
         #expect(NewSessionPicker(hosts: [], host: "unknown", client: client(fake)).host == nil, "an unknown host is this Mac")
     }
 
+    @Test func theGroupStartsAsGivenAndGoesToDefaultOnAnotherHost() {
+        let fake = FakeCalls()
+        fake.holding = true
+        let web = SessionGroup(id: "web", name: "web", color: "green")
+        let def = SessionGroup(id: "default", name: "Default", isDefault: true)
+        let ops = SessionGroup(id: "ops", name: "ops", host: "studio")
+        let p = NewSessionPicker(hosts: ["studio"], client: client(fake), groups: [def, web, ops], group: web)
+        #expect(p.group == .existing(web) && p.groupTitle == "web" && p.groupColor == "green")
+        #expect(p.hostGroups == [web, def])
+        p.setHost("studio")
+        #expect(p.group == .existing(nil) && p.groupTitle == "Default" && p.hostGroups == [ops], "web isn't on studio")
+        #expect(NewSessionPicker(hosts: [], client: client(fake), groups: [def, ops], group: ops).group == .existing(nil),
+                "a group on a host that isn't where it starts")
+    }
+
+    @Test func commandGListsTheHostsGroupsAndMakesANewOne() {
+        let fake = FakeCalls()
+        let web = SessionGroup(id: "web", name: "web", order: 10)
+        let api = SessionGroup(id: "api", name: "api", order: 5)
+        let def = SessionGroup(id: "default", name: "Default", isDefault: true)
+        let p = NewSessionPicker(hosts: [], client: client(fake), groups: [def, web, api], group: web)
+        #expect(!NewSessionPicker(hosts: [], client: client(fake)).handle(NewSessionPicker.groupKey!), "no groups: no list")
+
+        #expect(p.handle(NewSessionPicker.groupKey!) && p.choosingGroup)
+        #expect(p.groupRows == [.group(api), .group(web), .group(def), .new("")])
+        #expect(p.groupCursor == 1, "the cursor starts on the group it's in")
+        #expect(!p.handle(KeyCombo("tab")!), "tab doesn't change where while choosing a group")
+        p.moveGroupCursor(-5)
+        #expect(p.pickGroupAtCursor() && p.group == .existing(api) && !p.choosingGroup)
+
+        p.toggleGroups()
+        p.moveGroupCursor(10)
+        #expect(!p.pickGroupAtCursor() && p.choosingGroup, "a new group needs a name")
+        p.groupSearch = "AP"
+        #expect(p.groupRows == [.group(api), .new("AP")] && p.groupCursor == 0)
+        p.groupSearch = "api"
+        #expect(p.groupRows == [.group(api)], "no new group with a name that's there")
+        p.groupSearch = "infra "
+        #expect(p.groupRows == [.new("infra")] && p.groupRows[0].title == "New group “infra”")
+        #expect(p.pickGroupAtCursor() && p.group == .new("infra") && p.groupTitle == "infra (new)" && p.groupColor == nil)
+        p.toggleGroups()
+        #expect(p.groupCursor == 0, "a new group isn't in the list yet")
+        p.toggleGroups()
+        #expect(!p.choosingGroup)
+    }
+
     @Test func tabAndTheArrowsChangeWhere() {
         let fake = FakeCalls()
         fake.holding = true

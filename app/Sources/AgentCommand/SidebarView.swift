@@ -23,6 +23,10 @@ struct SidebarView: View {
     var newGroup: ([Session]) -> Void = { _ in }
     /// Asks for a group's new name.
     var renameGroup: (SessionGroup) -> Void = { _ in }
+    /// A click on a header: the sidebar takes the keyboard, with the group selected.
+    var clickGroup: (SessionGroup) -> Void = { _ in }
+    /// Asks, then archives a group and its sessions.
+    var archiveGroup: (SessionGroup) -> Void = { _ in }
     @State private var showArchived = false
 
     private var theme: AppTheme { .shared }
@@ -127,7 +131,7 @@ struct SidebarView: View {
                             sessionRow(session, link: link)
                         }
                     }
-                    if !store.archived.isEmpty {
+                    if !store.archivedSections.isEmpty {
                         archivedSection
                     }
                 }
@@ -146,17 +150,27 @@ struct SidebarView: View {
         .background(SidebarKeyHost(view: keys))
     }
 
-    /// A group's header: click to collapse; drop sessions on it to move them in,
-    /// or another group to put that one here.
+    /// A group's header: click to select the group, or its arrow to collapse it;
+    /// drop sessions on it to move them in, or another group to put that one here.
     private func groupHeader(_ header: GroupHeader) -> some View {
         let group = header.group
-        return GroupHeaderRow(header: header)
+        let headerID = SidebarLayout.headerID(group.key)
+        return GroupHeaderRow(header: header, isSelected: store.selectedGroupKey == group.key,
+                              isCursor: store.sidebarFocused && store.cursorID == headerID,
+                              isFocused: store.options.focused == group.key,
+                              toggle: { store.toggleCollapsed(group.key) })
+            .id(headerID)
             .contentShape(Rectangle())
-            .onTapGesture { store.toggleCollapsed(group.key) }
+            .onTapGesture { clickGroup(group) }
             .draggable(SidebarDrop.groupItem(group.key))
             .dropDestination(for: String.self) { items, _ in drop(items, onto: group.key) }
             .contextMenu {
                 Button(header.collapsed ? "Expand" : "Collapse") { store.toggleCollapsed(group.key) }
+                if store.options.focused == group.key {
+                    Button("Leave Focus") { store.focusGroup(nil) }
+                } else {
+                    Button("Focus") { store.focusGroup(group.key) }
+                }
                 if !group.isDefault {
                     Button("Rename…") { renameGroup(group) }
                     Menu("Colour") {
@@ -167,6 +181,7 @@ struct SidebarView: View {
                     Button("Move Up") { store.moveGroup(group.key, by: -1) }
                     Button("Move Down") { store.moveGroup(group.key, by: 1) }
                     Divider()
+                    Button("Archive Group…") { archiveGroup(group) }
                     Button("Delete Group") { store.deleteGroup(group.key) }
                 }
             }
@@ -272,16 +287,43 @@ struct SidebarView: View {
             .contentShape(Rectangle())
             .onTapGesture { showArchived.toggle() }
             if showArchived {
-                ForEach(store.archived) { session in
-                    SessionRow(session: session, link: .none, isSelected: false, isVisible: false, isClosed: false,
-                        isCursor: false, isMarked: false, unread: 0, showsFolder: true,
-                        scheduled: session.scheduledNote(jobs: store.jobs))
-                        .contextMenu {
-                            if session.can(.unarchive) {
-                                Button("Unarchive") { store.unarchive(session.id) }
+                ForEach(store.archivedSections) { section in
+                    archivedHeader(section)
+                    ForEach(section.sessions) { session in
+                        SessionRow(session: session, link: .none, isSelected: false, isVisible: false, isClosed: false,
+                            isCursor: false, isMarked: false, unread: 0, showsFolder: true,
+                            scheduled: session.scheduledNote(jobs: store.jobs))
+                            .contextMenu {
+                                if session.can(.unarchive) {
+                                    Button("Unarchive") { store.unarchive(session.id) }
+                                }
                             }
-                        }
+                    }
                 }
+            }
+        }
+    }
+
+    /// A group in the Archived section: its archived sessions are under it.
+    /// An archived group can come back from its menu.
+    private func archivedHeader(_ section: ArchivedSection) -> some View {
+        let group = section.group
+        return HStack(spacing: 6) {
+            Text(group.title).fontWeight(.bold).foregroundStyle(GroupHeaderRow.color(group.color, theme: theme)).lineLimit(1)
+            if group.isArchived {
+                Text("archived").font(AppFont.ui(11)).foregroundStyle(theme.dim)
+            }
+            Spacer(minLength: 0)
+            Text("\(section.sessions.count)").foregroundStyle(theme.dim)
+        }
+        .padding(.leading, 24)
+        .padding(.trailing, 12)
+        .padding(.top, 6)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if group.isArchived {
+                Button("Unarchive Group") { store.unarchiveGroup(group.key, sessions: false) }
+                Button("Unarchive Group and Sessions") { store.unarchiveGroup(group.key, sessions: true) }
             }
         }
     }
@@ -299,6 +341,12 @@ struct SidebarView: View {
 /// many sessions it lists, and, collapsed, what in it needs you.
 struct GroupHeaderRow: View {
     let header: GroupHeader
+    var isSelected = false
+    var isCursor = false
+    /// It's the group you focused.
+    var isFocused = false
+    /// Collapses or expands it: what its arrow does.
+    var toggle: () -> Void = {}
 
     private var theme: AppTheme { .shared }
 
@@ -316,8 +364,15 @@ struct GroupHeaderRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(header.collapsed ? "▸" : "▾").foregroundStyle(theme.dim)
-            Text(header.group.title).fontWeight(.bold).foregroundStyle(Self.color(header.group.color, theme: theme)).lineLimit(1)
+            Text(header.collapsed ? "▸" : "▾").foregroundStyle(isSelected ? theme.bg : theme.dim)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: toggle)
+                .help(header.collapsed ? "Expand" : "Collapse")
+            Text(header.group.title).fontWeight(.bold)
+                .foregroundStyle(isSelected ? theme.bg : Self.color(header.group.color, theme: theme)).lineLimit(1)
+            if isFocused {
+                Text("focused").font(AppFont.ui(11)).foregroundStyle(isSelected ? theme.bg : theme.dim)
+            }
             Spacer(minLength: 0)
             if header.collapsed, let urgent = header.urgent {
                 Text(urgent.reason == "unseen_done" ? "done" : urgent.reason.replacingOccurrences(of: "_", with: " "))
@@ -329,6 +384,10 @@ struct GroupHeaderRow: View {
         .padding(.horizontal, 12)
         .padding(.top, 10)
         .padding(.bottom, 2)
+        .background(isSelected ? theme.yellow : Color.clear)
+        .overlay {
+            if isCursor { Rectangle().strokeBorder(isSelected ? theme.bg : theme.fg, lineWidth: 1) }
+        }
     }
 }
 
@@ -504,6 +563,8 @@ nonisolated struct SetLinkMark: Shape {
 /// What a key does while the sidebar has the keyboard.
 enum SidebarKey: Equatable {
     case up, down, toggleMark, open, leave
+    /// On a group's header: collapse it, or expand it.
+    case collapse, expand
     /// Shows the session with this number, from 1.
     case number(Int)
     /// Shows the next session that needs you.
@@ -520,9 +581,11 @@ enum SidebarKey: Equatable {
         if combo.mods.isEmpty, let index = numberKeyCodes.firstIndex(of: keyCode) {
             return .number(index + 1)
         }
-        switch keys.action(for: combo, among: [.up, .down, .open, .back, .mark, .nextNeedingYou]) {
+        switch keys.action(for: combo, among: [.up, .down, .left, .right, .open, .back, .mark, .nextNeedingYou]) {
         case .up: return .up
         case .down: return .down
+        case .left: return .collapse
+        case .right: return .expand
         case .open: return .open
         case .back: return .leave
         case .mark: return .toggleMark
