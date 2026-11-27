@@ -102,13 +102,14 @@ func gather(ctx context.Context, captureEnv bool) (*gathered, error) {
 	}
 
 	g.in = setup.Input{
-		Home:        home,
-		ConfigFile:  p.Config(),
-		EnvFile:     p.Env(),
-		AcmdPath:    stableBinary(exe),
-		ClaudeDir:   setup.ClaudeConfigDir(home, os.Getenv),
-		HarnessDirs: harnessFolders(ctx, p, home),
-		Read:        os.ReadFile,
+		OtherFolders: !onDefaultFolders(),
+		Home:         home,
+		ConfigFile:   p.Config(),
+		EnvFile:      p.Env(),
+		AcmdPath:     stableBinary(exe),
+		ClaudeDir:    setup.ClaudeConfigDir(home, os.Getenv),
+		HarnessDirs:  harnessFolders(ctx, p, home),
+		Read:         os.ReadFile,
 
 		AntigravityDir: setup.AntigravityConfigDir(home),
 	}
@@ -293,7 +294,7 @@ func runUninstall(cmd *cobra.Command, dryRun, yes, keepData bool) error {
 	if err != nil {
 		return err
 	}
-	in := setup.Input{Home: home, ClaudeDir: setup.ClaudeConfigDir(home, os.Getenv), Read: os.ReadFile,
+	in := setup.Input{OtherFolders: !onDefaultFolders(), Home: home, ClaudeDir: setup.ClaudeConfigDir(home, os.Getenv), Read: os.ReadFile,
 		AntigravityDir: setup.AntigravityConfigDir(home)}
 	if ok {
 		in.ClaudeDir, in.HarnessDirs = rec.ClaudeDir, rec.ClaudeDirs
@@ -486,6 +487,10 @@ func daemonRunning(parent context.Context, p paths.Paths) bool {
 // writeServicePlan prints what init does to the service, as the plan prints
 // files, and says whether that changes anything.
 func writeServicePlan(out io.Writer, binary, home string) bool {
+	if !onDefaultFolders() {
+		fmt.Fprintf(out, "  %-9s the service: %s.\n", "skip", otherFoldersService)
+		return false
+	}
 	svc, err := localService()
 	if err != nil {
 		return false

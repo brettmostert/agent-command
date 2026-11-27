@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -263,5 +264,57 @@ func TestUseUserTempDirIgnoresHomebrewTMPDIR(t *testing.T) {
 	useUserTempDir()
 	if got := os.Getenv("TMPDIR"); got == "/private/tmp" || got == "" {
 		t.Errorf("TMPDIR = %q (test started with %q)", got, want)
+	}
+}
+
+// An acmd on other folders sets up only its own folders: the agents' hooks in
+// the home folder and the one per-user service are the default install's
+// (PAN-186). Its service commands refuse.
+func TestSetupOnOtherFoldersLeavesTheHooksAndServiceAlone(t *testing.T) {
+	sessionsHere(t)
+	s := newSandbox(t)
+	f := withService(t, "linux")
+	orig := onDefaultFolders
+	onDefaultFolders = func() bool { return !paths.Overridden() } // the sandbox is other folders
+	t.Cleanup(func() { onDefaultFolders = orig })
+
+	out, _, err := execute(t, "", "init")
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(s.settings); string(b) != string(s.userJSON) {
+		t.Errorf("init changed the agents' settings:\n%s", b)
+	}
+	if _, err := os.Stat(s.paths.Env()); err != nil {
+		t.Errorf("init should still save this acmd's login-shell environment: %v", err)
+	}
+	for _, want := range []string{"the agents' hooks were left alone", "skip      the service: there's one service for you"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init output lacks %q:\n%s", want, out)
+		}
+	}
+	if calls := f.Calls(); len(calls) != 0 || f.Running() {
+		t.Errorf("init reached the service: %q", calls)
+	}
+
+	for _, verb := range []string{"install", "uninstall"} {
+		_, _, err := execute(t, "", "service", verb)
+		if ExitCode(err) != exitInvalid || !strings.Contains(fmt.Sprint(err), "runs the acmd on the default folders") {
+			t.Errorf("service %s: %v (exit %d)", verb, err, ExitCode(err))
+		}
+	}
+	if calls := f.Calls(); len(calls) != 0 {
+		t.Errorf("acmd service reached the service: %q", calls)
+	}
+
+	// Uninstalling here doesn't take the default install's hooks away.
+	hooked, _, err := setup.AddHooks(s.userJSON, "/opt/homebrew/bin/acmd")
+	must(t, err)
+	must(t, os.WriteFile(s.settings, hooked, 0o600))
+	if out, _, err := execute(t, "", "uninstall", "--yes", "--keep-data"); err != nil {
+		t.Fatalf("uninstall: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(s.settings); string(b) != string(hooked) {
+		t.Errorf("uninstall changed the default install's hooks:\n%s", b)
 	}
 }

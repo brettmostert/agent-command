@@ -126,6 +126,7 @@ func doctorEnv() (doctor.Env, error) {
 	pathList := loginPath()
 	return doctor.Env{
 		ClientOnly:   clientOnly,
+		OtherFolders: !onDefaultFolders(),
 		OthersCanUse: othersCanUse,
 		Home:         home,
 		Paths:        p,

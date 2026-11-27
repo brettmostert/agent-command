@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -271,5 +272,53 @@ func TestWithLive(t *testing.T) {
 	}
 	if saved["SSH_AUTH_SOCK"] != "/var/run/old/Listeners" {
 		t.Error("WithLive changed the saved env")
+	}
+}
+
+// On other folders, no plan touches the agents' hook files: they're the
+// default install's (PAN-186). acmd's own settings are still planned.
+func TestPlansOnOtherFoldersLeaveTheAgentsHooksAlone(t *testing.T) {
+	home := t.TempDir()
+	in := Input{OtherFolders: true, Home: home, ConfigFile: filepath.Join(home, "acmd", "config.toml"),
+		EnvFile: filepath.Join(home, "acmd", "env.json"), AcmdPath: "/dev/acmd", ClaudeDir: filepath.Join(home, ".claude"),
+		HarnessDirs: []string{filepath.Join(home, ".claude-work")}, ClaudePath: "/bin/claude", Read: os.ReadFile,
+		AntigravityDir: filepath.Join(home, ".gemini", "config"), AgyPath: "/bin/agy", LoginEnv: LoginEnv{"PATH": "/bin"}}
+	hookFiles := []string{in.ClaudeSettingsFile(), filepath.Join(home, ".claude-work", "settings.json"),
+		filepath.Join(in.AntigravityDir, "hooks.json")}
+	check := func(name string, p *Plan, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.Contains(p.Notes, OtherFoldersNote) {
+			t.Errorf("%s doesn't say why: %q", name, p.Notes)
+		}
+		var touched []string
+		for _, c := range p.Changes {
+			if slices.Contains(hookFiles, c.Path) {
+				t.Errorf("%s touches %s", name, c.Path)
+			}
+			touched = append(touched, c.Path)
+		}
+		return touched
+	}
+	p, err := PlanInit(in)
+	if touched := check("init", p, err); !slices.Contains(touched, in.ConfigFile) || !slices.Contains(touched, in.EnvFile) {
+		t.Errorf("init should still set up acmd's own folders: %q", touched)
+	}
+	p, err = PlanHooks(in)
+	if touched := check("hooks", p, err); len(touched) != 0 {
+		t.Errorf("hooks: %q", touched)
+	}
+	p, err = PlanUninstall(in)
+	if touched := check("uninstall", p, err); len(touched) != 0 {
+		t.Errorf("uninstall: %q", touched)
+	}
+
+	in.OtherFolders = false
+	p, err = PlanInit(in)
+	must(t, err)
+	if !slices.ContainsFunc(p.Changes, func(c Change) bool { return c.Path == in.ClaudeSettingsFile() }) {
+		t.Error("on the default folders, init sets up the hooks")
 	}
 }

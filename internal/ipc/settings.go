@@ -77,12 +77,15 @@ const (
 	HealthConfigInvalid = "config.invalid"
 	// HealthSetupOffer: hooks acmd needs are missing, so it offers to add them.
 	HealthSetupOffer = "setup.offer"
-	// HealthSetupRefresh: the hooks run an acmd that isn't this one (it moved):
+	// HealthSetupRefresh: the hooks run an acmd that's gone (it moved):
 	// setting up again fixes it without asking.
 	HealthSetupRefresh = "setup.refresh"
-	HealthHooks        = "hooks."
-	HealthWake         = "wake"
-	HealthHostingOff   = "remote.hosting_off"
+	// HealthSetupOtherFolders: this acmd is on other folders, so the agents'
+	// hooks are the default install's, and its sessions show no live status.
+	HealthSetupOtherFolders = "setup.other_folders"
+	HealthHooks             = "hooks."
+	HealthWake              = "wake"
+	HealthHostingOff        = "remote.hosting_off"
 	// HealthAcmdOlder: acmd is older than the app using it (they upgrade
 	// separately), so the app may not show everything.
 	HealthAcmdOlder = "acmd.older_than_app"

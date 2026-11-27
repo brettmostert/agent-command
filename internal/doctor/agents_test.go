@@ -108,7 +108,8 @@ func TestHealth(t *testing.T) {
 		t.Errorf("offer = %+v", h[2])
 	}
 
-	// Hooks that run another acmd that works: set up again, without asking.
+	// Hooks that run another acmd that's still installed: an offer, never a
+	// quiet set up, so a second acmd can't take the hooks over (PAN-186).
 	f2 := newFake(t)
 	other := filepath.Join(f2.home, "old", "acmd")
 	f2.write(other, "#!/bin/sh\n", 0o755)
@@ -116,8 +117,35 @@ func TestHealth(t *testing.T) {
 	must(t, err)
 	f2.write(filepath.Join(f2.home, ".claude/settings.json"), string(settings), 0o600)
 	h = Health(ctx, f2.Env())
-	if !strings.HasSuffix(healthIDs(h), ipc.HealthSetupRefresh) {
-		t.Errorf("stale: %s", healthIDs(h))
+	if strings.Contains(healthIDs(h), ipc.HealthSetupRefresh) || !strings.HasSuffix(healthIDs(h), ipc.HealthSetupOffer) {
+		t.Fatalf("another acmd: %s", healthIDs(h))
+	}
+	if offer := h[len(h)-1]; offer.Title != "Use this acmd for the hooks?" || !strings.Contains(offer.Detail, other) ||
+		!strings.Contains(offer.Detail, f2.acmd) || offer.Fix.Op != ipc.OpInit {
+		t.Errorf("offer = %+v", offer)
+	}
+
+	// One that can't run, or is gone, moved: set up again, without asking.
+	must(t, os.Chmod(other, 0o644))
+	if h = Health(ctx, f2.Env()); !strings.HasSuffix(healthIDs(h), ipc.HealthSetupRefresh) {
+		t.Errorf("not executable: %s", healthIDs(h))
+	}
+	must(t, os.Remove(other))
+	if h = Health(ctx, f2.Env()); !strings.HasSuffix(healthIDs(h), ipc.HealthSetupRefresh) {
+		t.Errorf("gone: %s", healthIDs(h))
+	}
+
+	// On other folders, the hooks are the default install's: no setup at all,
+	// whatever they run or lack, so the app never sets up from here.
+	env := f2.Env()
+	env.OtherFolders = true
+	if h = Health(ctx, env); healthIDs(h) != ipc.HealthSetupOtherFolders || h[0].Fix != nil || h[0].Severity != ipc.HealthInfo {
+		t.Errorf("other folders: %+v", h)
+	}
+	env = f.Env()
+	env.OtherFolders = true
+	if h = Health(ctx, env); healthIDs(h) != ipc.HealthSetupOtherFolders {
+		t.Errorf("other folders, no hooks: %s", healthIDs(h))
 	}
 	if sentence("") != "" || sentence("ok.") != "Ok." {
 		t.Error("sentence")
