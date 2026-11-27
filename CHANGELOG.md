@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.99.0](https://github.com/brettmostert/agent-command/compare/v0.98.0...v0.99.0) (2026-11-27)
+
+
+### Features
+
+* install acmd with one command: install.sh, and install.ps1 on Windows ([#219](https://github.com/brettmostert/agent-command/issues/219)) ([8efb56f](https://github.com/brettmostert/agent-command/commit/8efb56f5de0c2e2e0a634f3df63b5fe00c7eedf6))
+
 ## [0.98.0](https://github.com/brettmostert/agent-command/compare/v0.97.0...v0.98.0) (2026-11-27)
 
 
