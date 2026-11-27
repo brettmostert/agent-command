@@ -78,11 +78,10 @@ func newNewCmd() *cobra.Command {
 			if o.remote, err = remoteFlag(remote, noRemote); err != nil {
 				return err
 			}
-			if o.cwd == "" {
-				o.cwd, _ = os.Getwd()
-				if targetHost != "" {
-					o.cwd = "~" // the host's home
-				}
+			// With a group and no folder, a folder's path is where it starts;
+			// startOnHost falls back to the current folder for a group.
+			if o.cwd == "" && o.group == "" {
+				o.cwd = defaultCwd()
 			}
 			s, err := startSession(cmd.Context(), o)
 			if err != nil {
@@ -180,6 +179,9 @@ func startSession(ctx context.Context, o newOptions) (*core.Session, error) {
 	if _, err := config.Load(p.Config()); err != nil {
 		return nil, err
 	}
+	if o.cwd == "" { // a folder's path, or the current folder (startOnHost)
+		return startOnHost(ctx, o, "")
+	}
 	dir, err := filepath.Abs(o.cwd)
 	if err != nil {
 		return nil, err
@@ -188,6 +190,16 @@ func startSession(ctx context.Context, o newOptions) (*core.Session, error) {
 		return nil, fmt.Errorf("%s isn't a folder", dir)
 	}
 	return startOnHost(ctx, o, dir)
+}
+
+// defaultCwd is where a session starts with no folder given: the current
+// folder, or with --host the host's home.
+func defaultCwd() string {
+	if targetHost != "" {
+		return "~"
+	}
+	wd, _ := os.Getwd()
+	return wd
 }
 
 // startOnHost asks the daemon (this machine's, or with --host the host's) to
@@ -213,7 +225,11 @@ func startOnHost(ctx context.Context, o newOptions, dir string) (*core.Session, 
 				g = created.Core(false)
 			}
 			req.GroupID = g.ID
+			if req.Cwd == "" && !g.IsFolder() {
+				req.Cwd = defaultCwd()
+			}
 		}
+		// An empty Cwd here is a folder's: the daemon starts it at the folder's path.
 		return c.call(ipc.OpNew, req, &s)
 	})
 	return s.Core(), err

@@ -63,7 +63,7 @@ func TestHarnessMigrationLinksSessionsAndJobs(t *testing.T) {
 		`INSERT INTO jobs (id, spec, cron, created_at, updated_at, last_due) VALUES
 			('j-agy', '{"name":"a","harness":"antigravity","where":"folder"}', '0 9 * * *', 1, 1, 1),
 			('j-claude', '{"name":"c","where":"folder"}', '0 9 * * *', 1, 1, 1)`,
-		`ALTER TABLE sessions ADD COLUMN bg_id TEXT NOT NULL DEFAULT ''`, `ALTER TABLE sessions ADD COLUMN external TEXT NOT NULL DEFAULT ''`, `ALTER TABLE groups ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`, `PRAGMA user_version = 19`,
+		`ALTER TABLE sessions ADD COLUMN bg_id TEXT NOT NULL DEFAULT ''`, `ALTER TABLE sessions ADD COLUMN external TEXT NOT NULL DEFAULT ''`, `ALTER TABLE groups DROP COLUMN path`, `ALTER TABLE groups ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`, `PRAGMA user_version = 19`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)

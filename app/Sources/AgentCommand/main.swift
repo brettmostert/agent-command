@@ -92,6 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 },
                 newGroup: { [weak self] sessions in self?.showNewGroup(sessions) },
                 renameGroup: { [weak self] group in self?.showRenameGroup(group) },
+                newFolder: { [weak self] sessions in self?.showNewFolder(sessions) },
+                chooseGroupPath: { [weak self] group in self?.chooseGroupPath(group.key) },
                 clickGroup: { [weak self] group in self?.clickSidebarGroup(group) },
                 archiveGroup: { [weak self] group in self?.archiveGroup(group.key) },
                 deleteGroup: { [weak self] group in self?.deleteGroup(group.key) }
@@ -590,7 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    /// ⇧⌘T: a terminal, with the folder panel's Remote checkbox.
+    /// ⌘T: a terminal, with the folder panel's Remote checkbox.
     @objc private func newTerminal() { newInContext(harness: .terminal, asksRemote: true) }
 
     /// A session in the group you're in (SessionStore.newSessionGroup). A host's
@@ -617,11 +619,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    /// The group's id, making it first if it's new; nil is no group.
-    private func withGroup(_ group: NewSessionGroup, on host: String, _ start: @escaping (String?) -> Void) {
+    /// The group's id, making it first if it's new; nil is no group. A new
+    /// folder is made at dir, the session's folder.
+    private func withGroup(_ group: NewSessionGroup, on host: String, at dir: String, _ start: @escaping (String?) -> Void) {
         switch group {
         case .existing(let found): start(found?.id)
         case .new(let name): store.createGroup(name, on: host) { start($0.id) }
+        case .newFolder(let name): store.createGroup(name, path: dir, on: host) { start($0.id) }
+        }
+    }
+
+    /// A folder's path, where a new session in it starts the chooser.
+    private static func startPath(_ group: NewSessionGroup) -> String? {
+        if case .existing(let found?) = group, found.isFolder { return found.path }
+        return nil
+    }
+
+    /// Asks for a folder, on host ("" is this Mac), starting at start: the
+    /// chooser can make a new folder. then gets its path.
+    private func choosePath(on host: String, start: String?, title: String, _ then: @escaping (String) -> Void) {
+        if host.isEmpty {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Choose"
+            panel.message = title
+            panel.directoryURL = start.map { URL(fileURLWithPath: $0) } ?? lastFolder
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            then(url.path)
+            return
+        }
+        closePopup()
+        showMainWindow()
+        let chooser = RemoteFolderChooser(host: host, client: store.remoteClient)
+        chooser.startPath = start
+        chooser.choose = { [weak self] dir in
+            self?.closePopup()
+            then(dir)
+        }
+        showPopup(RemoteFolderView(model: chooser, title: "\(title) on \(host)", close: { [weak self] in self?.closePopup() }))
+    }
+
+    /// Asks for a folder's path, then its name (the folder's own, to start
+    /// with), and makes it with these sessions in it, on their host.
+    private func showNewFolder(_ sessions: [Session]) {
+        let host = sessions.first?.hostName ?? ""
+        choosePath(on: host, start: nil, title: "Choose the new folder's path") { [weak self] path in
+            guard let self else { return }
+            self.closePopup()
+            self.showMainWindow()
+            let name = (path as NSString).lastPathComponent
+            self.showPopup(GroupNameView(title: "New folder at \(JobTime.tilde(path))", name: name, close: { [weak self] in self?.closePopup() }) {
+                [weak self] name in
+                self?.store.createGroup(name, path: path, moving: sessions.map(\.id), on: host)
+                self?.store.clearMarks()
+                self?.closePopup()
+            })
+        }
+    }
+
+    /// Asks for a path, and makes a group a folder there, or changes a folder's.
+    private func chooseGroupPath(_ key: String) {
+        guard let group = store.group(key: key) else { return }
+        let title = group.isFolder ? "Choose the new path for \(group.title)" : "Choose the path for \(group.title)"
+        choosePath(on: group.host, start: group.isFolder ? group.path : nil, title: title) { [weak self] path in
+            self?.store.setGroupPath(key, path)
         }
     }
 
@@ -662,8 +726,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// The host's folders, for a session on it. It's created there, Remote, and shown here.
     private func chooseRemoteFolder(host: String, harness: Harness, group: NewSessionGroup = .existing(nil)) {
         let chooser = RemoteFolderChooser(host: host, client: store.remoteClient)
+        chooser.startPath = Self.startPath(group)
         chooser.choose = { [weak self, weak chooser] dir in
-            self?.withGroup(group, on: host) { id in
+            self?.withGroup(group, on: host, at: dir) { id in
                 self?.store.newRemoteSession(host: host, dir: dir, harness: harness, group: id, done: { failure in
                     if let failure, let chooser {
                         chooser.fail(failure)
@@ -697,7 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.allowsMultipleSelection = false
         panel.prompt = harness.panelPrompt
         panel.message = "Choose the folder for the new session"
-        panel.directoryURL = lastFolder
+        panel.directoryURL = Self.startPath(group).map { URL(fileURLWithPath: $0) } ?? lastFolder
         let remoteBox = NSButton(
             checkboxWithTitle: "Remote: other Agent Commands using this Mac's Hosting can see and use it", target: nil, action: nil)
         if asksRemote {
@@ -712,7 +777,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard panel.runModal() == .OK, let url = panel.url else { return }
         lastFolder = url
         let remote = asksRemote ? remoteBox.state == .on : nil
-        withGroup(group, on: "") { [weak self] id in
+        withGroup(group, on: "", at: url.path) { [weak self] id in
             self?.store.newSession(harness: harness, in: url.path, remote: remote, group: id)
         }
     }
@@ -1245,6 +1310,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             store.clearMarks()
         case .focusGroup(let key): store.focusGroup(key)
         case .archiveGroup(let key): archiveGroup(key)
+        case .newFolder(let sessions): showNewFolder(sessions)
+        case .chooseGroupPath(let key): chooseGroupPath(key)
+        case .clearGroupPath(let key): store.setGroupPath(key, nil)
         case .moveToNoGroup(let sessions):
             store.moveToNoGroup(sessions.map(\.id))
             store.clearMarks()

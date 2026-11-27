@@ -346,6 +346,7 @@ private struct JobForm: View {
                         harnessField(draft)
                         scheduleField(draft)
                         promptField(draft)
+                        groupField(draft)
                         placeField(draft)
                         settingsField(draft)
                         Toggle("Run a run the Mac slept through when it wakes (otherwise it's shown as missed)", isOn: draft.runMissed)
@@ -472,6 +473,21 @@ private struct JobForm: View {
         guard fileLoaded != file.path || fileText == "" else { return }
         fileLoaded = file.path
         fileText = file.text
+    }
+
+    /// The job's group: a group, a folder (which fills in its path), or none.
+    private func groupField(_ draft: Binding<JobDraft>) -> some View {
+        field("Group", hint: "Its sessions go in it. A folder fills in its path, which you can still change.", error: model.problem("group")) {
+            Picker("", selection: Binding(get: { draft.wrappedValue.groupID }, set: { model.setGroup($0) })) {
+                Text("No group").tag("")
+                ForEach(model.groupChoices) { group in
+                    Label(group.isFolder ? "\(group.name) — \(JobTime.tilde(group.path))" : group.name, systemImage: group.symbol)
+                        .tag(group.id)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+        }
     }
 
     private func placeField(_ draft: Binding<JobDraft>) -> some View {

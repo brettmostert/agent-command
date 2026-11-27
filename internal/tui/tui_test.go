@@ -189,7 +189,7 @@ func TestDrawsTheSessionsHereThenEachHost(t *testing.T) {
 		"acmd · 3 sessions · 2 need you",
 		"This machine", "    api", "busy",
 		"    web", "waiting   permission: Bash: make test (1 Yes · 2 Yes, and don't ask again · 3 No)",
-		"studio", "  Writing (1)", "    docs", "done: Docs are done.",
+		"studio", "  ● Writing (1)", "    docs", "done: Docs are done.",
 		keysHelp,
 	} {
 		if !strings.Contains(s, want) {

@@ -6,6 +6,8 @@ import Observation
 nonisolated enum NewSessionGroup: Equatable {
     case existing(SessionGroup?)
     case new(String)
+    /// A folder to make with this name, at the folder chosen for the session.
+    case newFolder(String)
 }
 
 /// A line of ⇧⌘N's group list.
@@ -15,12 +17,15 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     case none
     /// Make a group with the name typed: "" until there is one.
     case new(String)
+    /// Make a folder with the name typed, at the session's folder.
+    case newFolder(String)
 
     var id: String {
         switch self {
         case .group(let group): group.key
         case .none: "none"
         case .new: "new"
+        case .newFolder: "newFolder"
         }
     }
 
@@ -29,6 +34,17 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
         case .group(let group): group.name
         case .none: "No group"
         case .new(let name): name.isEmpty ? "New group…" : "New group “\(name)”"
+        case .newFolder(let name): name.isEmpty ? "New folder…" : "New folder “\(name)”"
+        }
+    }
+
+    /// Its SF Symbol: a folder's or a group's; none for no group.
+    var symbol: String? {
+        switch self {
+        case .group(let group): group.symbol
+        case .none: nil
+        case .new: "circle.fill"
+        case .newFolder: "folder"
         }
     }
 }
@@ -79,6 +95,17 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
         case .existing(let group?): group.name
         case .existing(nil): "No group"
         case .new(let name): name + " (new)"
+        case .newFolder(let name): name + " (new folder)"
+        }
+    }
+
+    /// The group line's SF Symbol, for its kind.
+    var groupSymbol: String? {
+        switch group {
+        case .existing(let group?): group.symbol
+        case .existing(nil): nil
+        case .new: "circle.fill"
+        case .newFolder: "folder"
         }
     }
 
@@ -94,7 +121,7 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
         let typed = groupSearch.trimmingCharacters(in: .whitespaces)
         let shown = hostGroups.filter { typed.isEmpty || $0.name.localizedCaseInsensitiveContains(typed) }
         let exact = shown.contains { $0.name.caseInsensitiveCompare(typed) == .orderedSame }
-        return shown.map(NewSessionGroupRow.group) + (typed.isEmpty ? [.none] : []) + (exact ? [] : [.new(typed)])
+        return shown.map(NewSessionGroupRow.group) + (typed.isEmpty ? [.none] : []) + (exact ? [] : [.new(typed), .newFolder(typed)])
     }
 
     func toggleGroups() {
@@ -120,6 +147,9 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
         case .new(let name):
             guard !name.isEmpty else { return false }
             group = .new(name)
+        case .newFolder(let name):
+            guard !name.isEmpty else { return false }
+            group = .newFolder(name)
         }
         choosingGroup = false
         groupSearch = ""
@@ -249,6 +279,8 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     @ObservationIgnored private var generation = 0
     /// Called with the folder chosen, on the host.
     @ObservationIgnored var choose: (String) -> Void = { _ in }
+    /// Where it opens: a folder's path. nil opens on the recent folders.
+    @ObservationIgnored var startPath: String?
 
     init(host: String?, picksFile: Bool = false, fileExts: [String]? = nil, client: RemoteHostsClient = RemoteHostsClient()) {
         self.host = host
@@ -260,8 +292,12 @@ nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
     /// Where the folders are: a host, or this Mac.
     var hostName: String { host ?? "this Mac" }
 
-    /// Recent folders first; with none, the home folder.
+    /// The start path's folder, else recent folders first; with none, the home folder.
     func start() {
+        if let startPath, !startPath.isEmpty {
+            browse(startPath)
+            return
+        }
         loading = true
         let mine = next()
         client.recentFolders(host: host) { [weak self] result in

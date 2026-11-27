@@ -406,3 +406,12 @@ extension UsesSharedSpeech.GroupCallsTests {
     #expect(sections.last?.group == nil && sections.last?.id == "nogroup:")
     #expect(SidebarLayout.archivedSections(sessions: [], groups: groups).map(\.id) == ["old"])
 }
+
+// MARK: Folders (PAN-188)
+
+@Test func aGroupWithAPathIsAFolder() throws {
+    let folder: SessionGroup = try JSONDecoder().decode(SessionGroup.self, from: Data(#"{"id":"f","name":"api","path":"/w/api"}"#.utf8))
+    #expect(folder.isFolder && folder.path == "/w/api" && folder.symbol == "folder")
+    let group = SessionGroup(id: "g", name: "Backend")
+    #expect(!group.isFolder && group.symbol == "circle.fill")
+}

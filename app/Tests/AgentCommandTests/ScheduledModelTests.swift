@@ -214,7 +214,7 @@ private func job(_ id: String, _ name: String, cwd: String = "/w") -> Job {
     board.store.groups = [SessionGroup(id: "G", name: "Scheduled")]
     let model = board.model
     #expect(model.sessionName("S1") == "standup" && model.sessionName("nope") == nil)
-    #expect(model.groupName("G") == "Scheduled" && model.groupName("") == "Default")
+    #expect(model.groupName("G") == "Scheduled" && model.groupName("") == "No group")
     #expect(model.continuableSessions.map(\.id) == ["S1"], "terminals without Claude, and other agents, can't continue")
 
     // A job deleted elsewhere moves the selection on.
@@ -459,4 +459,28 @@ extension UsesSharedSpeech {
     model.save()
     #expect(model.error?.contains("was deleted") == true && model.draft?.isNew == true && model.draft?.version == "")
     #expect(JobDraft(loaded).duplicate().version == "", "a copy is a new job")
+}
+
+// A job's group: choosing a folder fills in its path, which can still be
+// changed; a group leaves the path as it is (PAN-188).
+@MainActor @Test func choosingAFolderFillsInTheJobsPath() throws {
+    let board = try Board(jobs: [])
+    board.store.groups = [SessionGroup(id: "f", name: "api", path: "/w/api"), SessionGroup(id: "g", name: "Backend"),
+                          SessionGroup(id: "h", name: "theirs", host: "studio", path: "/x")]
+    let model = board.model
+    model.newJob()
+    #expect(model.groupChoices.map(\.id) == ["f", "g"], "this Mac's groups and folders: jobs run here")
+    model.draft?.cwd = "/mine"
+    model.setGroup("g")
+    #expect(model.draft?.groupID == "g" && model.draft?.cwd == "/mine", "a group leaves the path alone")
+    model.setGroup("f")
+    #expect(model.draft?.groupID == "f" && model.draft?.cwd == "/w/api", "a folder fills in its path")
+    model.draft?.cwd = "/w/api/sub"
+    #expect(model.draft?.cwd == "/w/api/sub", "which can still be changed")
+    model.draft?.place = .session
+    model.draft?.cwd = ""
+    model.setGroup("f")
+    #expect(model.draft?.cwd == "", "a job that continues a session has no path to fill")
+    model.setGroup("")
+    #expect(model.draft?.groupID == "" && model.groupName("") == "No group")
 }

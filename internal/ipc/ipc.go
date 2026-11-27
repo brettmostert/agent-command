@@ -300,6 +300,7 @@ const (
 	MutGroupCreate    = "group.create"      // Text (name), Color -> returns the group
 	MutGroupRename    = "group.rename"      // GroupID, Text
 	MutGroupColor     = "group.color"       // GroupID, Color
+	MutGroupPath      = "group.path"        // GroupID, Path: make it a folder, or ("") a group
 	MutGroupDelete    = "group.delete"      // GroupID
 	MutGroupArchive   = "group.archive"     // GroupID (archives its sessions too)
 	MutGroupUnarchive = "group.unarchive"   // GroupID, Flag = also unarchive sessions
@@ -355,10 +356,13 @@ type Mutation struct {
 	GroupID      string   `json:"group_id,omitempty"`
 	Text         string   `json:"text,omitempty"`
 	Color        string   `json:"color,omitempty"`
-	Flag         bool     `json:"flag,omitempty"`
-	SetID        string   `json:"set_id,omitempty"`
-	After        string   `json:"after,omitempty"`
-	Before       string   `json:"before,omitempty"`
+	// Path is a folder's path, for group.create and group.path. It's made
+	// if it's missing, on the group's host.
+	Path   string `json:"path,omitempty"`
+	Flag   bool   `json:"flag,omitempty"`
+	SetID  string `json:"set_id,omitempty"`
+	After  string `json:"after,omitempty"`
+	Before string `json:"before,omitempty"`
 	// Host is the machine its group, set and neighbor are on, and the one
 	// a mutation with no targets is for (the group kinds, a new group): a
 	// known Remote host's name, or "" for this machine. A host is always

@@ -152,16 +152,25 @@ nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
     var order = 0
     /// The Remote host it's on, for a host's tree; "" for this Mac's.
     var host = ""
+    /// A folder's path, on its host: new sessions and schedules in it start
+    /// there. "" is a group, which has no path.
+    var path = ""
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color, order, host
+        case id, name, color, order, host, path
         case archivedAt = "archived_at"
     }
 
-    init(id: String, name: String, archivedAt: String = "", color: String = "", order: Int = 0, host: String = "") {
+    init(id: String, name: String, archivedAt: String = "", color: String = "", order: Int = 0, host: String = "", path: String = "") {
         (self.id, self.name, self.archivedAt) = (id, name, archivedAt)
-        (self.color, self.order, self.host) = (color, order, host)
+        (self.color, self.order, self.host, self.path) = (color, order, host, path)
     }
+
+    /// It's a folder: a group with a path.
+    var isFolder: Bool { !path.isEmpty }
+
+    /// The SF Symbol for its kind: a folder, or a dot for a group.
+    var symbol: String { isFolder ? "folder" : "circle.fill" }
 
     /// It told apart from other hosts' groups of the same id.
     var key: String { Self.key(host, id) }
@@ -183,6 +192,7 @@ nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
         color = try c.decodeIfPresent(String.self, forKey: .color) ?? ""
         order = try c.decodeIfPresent(Int.self, forKey: .order) ?? 0
         host = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
+        path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
     }
 
     /// The colours a group can have, in the daemon's order.

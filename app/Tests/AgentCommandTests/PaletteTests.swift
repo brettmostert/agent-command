@@ -13,8 +13,9 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
 @Test func paletteWithNothingShowingHasTheAppWideCommands() {
     let entries = Palette.entries(PaletteState())
     #expect(titles(entries, in: "New") == [
-        "Claude session", "Antigravity session", "Terminal", "New session…", "Resume a session…", "Group…",
+        "Claude session", "Antigravity session", "Terminal", "New session…", "Resume a session…", "Group…", "Folder…",
     ])
+    #expect(entry(entries, "New", "Folder…")?.action == .newFolder([]))
     #expect(entry(entries, "New", "Group…")?.action == .newGroup([]))
     #expect(entry(entries, "New", "Claude session")?.action == .newSession(harness: "kind:claude"))
     #expect(entry(entries, "New", "Claude session")?.shortcut == "⌘N")
@@ -50,7 +51,7 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     let other = try makeSession(id: "t1", name: "shell", harness: "terminal", status: "running")
     let entries = Palette.entries(PaletteState(targets: [claude], sessions: [claude, other], setMembers: [["c1", "t1"]]))
     #expect(titles(entries, in: "Claude session") == [
-        "Rename…", "Archive…", "Turn Remote on", "Move to a new group…", "Move out of set", "Open in editor", "Copy folder path",
+        "Rename…", "Archive…", "Turn Remote on", "Move to a new group…", "Move to a new folder…", "Move out of set", "Open in editor", "Copy folder path",
         "Copy Claude session ID",
     ])
     #expect(entry(entries, "Claude session", "Copy folder path")?.action == .copy("/w/api"))
@@ -68,7 +69,7 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     let terminal = try makeSession(id: "t1", harness: "terminal")
     let entries = Palette.entries(PaletteState(targets: [terminal], sessions: [terminal]))
     #expect(titles(entries, in: "Terminal session") == [
-        "Rename…", "Archive…", "Turn Remote on", "Move to a new group…", "Open in editor", "Copy folder path",
+        "Rename…", "Archive…", "Turn Remote on", "Move to a new group…", "Move to a new folder…", "Open in editor", "Copy folder path",
     ])
     #expect(entry(entries, "Terminal session", "Open in editor")?.shortcut == "⇧⌘E")
     let nowhere = try makeSession(id: "n1", cwd: "", harness: "terminal")
@@ -79,7 +80,7 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     let agent = try makeSession(id: "g1", harness: "antigravity")
     let entries = Palette.entries(PaletteState(targets: [agent], sessions: [agent]))
     #expect(titles(entries, in: "Antigravity session") == [
-        "Rename…", "Archive…", "Turn Remote on", "Move to a new group…", "Open in editor", "Copy folder path",
+        "Rename…", "Archive…", "Turn Remote on", "Move to a new group…", "Move to a new folder…", "Open in editor", "Copy folder path",
     ])
     let unnamed = try makeSession(id: "x1", harness: "codex")
     #expect(titles(Palette.entries(PaletteState(targets: [unnamed])), in: "Codex session").first == "Rename…",
@@ -197,17 +198,22 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     let api = SessionGroup(id: "api", name: "api")
     var state = PaletteState(group: web)
     var entries = Palette.entries(state)
-    #expect(titles(entries, in: "Groups") == ["Focus web", "Archive group web…"])
+    #expect(titles(entries, in: "Groups") == ["Focus web", "Make web a folder…", "Archive group web…"])
+    #expect(entry(entries, "Groups", "Make web a folder…")?.action == .chooseGroupPath("web"))
     #expect(entry(entries, "Groups", "Focus web")?.action == .focusGroup("web"))
     #expect(entry(entries, "Groups", "Archive group web…")?.action == .archiveGroup("web"))
 
     state.focusedGroup = web
     entries = Palette.entries(state)
-    #expect(titles(entries, in: "Groups") == ["Leave focus on web", "Archive group web…"], "no Focus for the group already focused")
+    #expect(titles(entries, in: "Groups") == ["Leave focus on web", "Make web a folder…", "Archive group web…"], "no Focus for the group already focused")
     #expect(entry(entries, "Groups", "Leave focus on web")?.action == .focusGroup(nil))
 
-    state.group = api
-    #expect(titles(Palette.entries(state), in: "Groups") == ["Leave focus on web", "Focus api", "Archive group api…"])
+    state.group = SessionGroup(id: "api", name: "api", path: "/w/api")
+    entries = Palette.entries(state)
+    #expect(titles(entries, in: "Groups") == ["Leave focus on web", "Focus api", "Change the path of api…", "Make api a group", "Archive group api…"])
+    #expect(entry(entries, "Groups", "Change the path of api…")?.action == .chooseGroupPath("api"))
+    #expect(entry(entries, "Groups", "Make api a group")?.action == .clearGroupPath("api"))
+    _ = api
     #expect(titles(Palette.entries(PaletteState()), in: "Groups").isEmpty)
 }
 
