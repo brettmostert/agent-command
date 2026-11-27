@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.95.0](https://github.com/brettmostert/agent-command/compare/v0.94.3...v0.95.0) (2026-11-27)
+
+
+### Features
+
+* add Go Linux UI with GTK4, libadwaita, VTE, and Ghostty themes ([#196](https://github.com/brettmostert/agent-command/issues/196)) ([886d53b](https://github.com/brettmostert/agent-command/commit/886d53bf1b81f8ce1d1fdc1692b96177b9f353ff))
+* folders: a group with a path, which new sessions and schedules start in ([#214](https://github.com/brettmostert/agent-command/issues/214)) ([07f64b2](https://github.com/brettmostert/agent-command/commit/07f64b2f7e2ec78560e72457f727a464f5e7a5f2))
+* no Default group: a session can be in no group, and deleting a group archives its sessions ([#213](https://github.com/brettmostert/agent-command/issues/213)) ([85cbaf9](https://github.com/brettmostert/agent-command/commit/85cbaf99d271519caee971e3d0ab8f91d4453e8e))
+* the macOS app archives and focuses a group, and starts a new session in a group ([#211](https://github.com/brettmostert/agent-command/issues/211)) ([ff5b1f4](https://github.com/brettmostert/agent-command/commit/ff5b1f43d4c8ef6fe9342cc7215c19ed4fcb14e3))
+
+
+### Bug Fixes
+
+* an acmd on other folders leaves the real hooks and service alone, and a second acmd never takes the hooks quietly ([#212](https://github.com/brettmostert/agent-command/issues/212)) ([76ec5f7](https://github.com/brettmostert/agent-command/commit/76ec5f771eca68b37b90d78d8a64f60736ac11ab))
+* archiving a group checks the group first, and archives it and its sessions all at once ([#209](https://github.com/brettmostert/agent-command/issues/209)) ([a19d0e5](https://github.com/brettmostert/agent-command/commit/a19d0e525df3f093d84e4ddbdd482712b1ac8137))
+* the daemon no longer keeps focus mode: focus is each client's own view ([#210](https://github.com/brettmostert/agent-command/issues/210)) ([3b2c215](https://github.com/brettmostert/agent-command/commit/3b2c215c4bf1a20a4216bf5a77ef756dfc8a0f5e))
+
 ## [0.94.3](https://github.com/brettmostert/agent-command/compare/v0.94.2...v0.94.3) (2026-11-25)
 
 
