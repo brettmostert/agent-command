@@ -97,6 +97,7 @@ type Model struct {
 type row struct {
 	section string // a section header: "" for others
 	group   string // a group header: "" for others
+	color   string // the group's color (core.NormalizeColor)
 	host    string // the section's host ("" for this machine)
 	s       *core.Session
 	waiting *core.InboxItem // its open Inbox item, if any
@@ -325,7 +326,11 @@ func (m *Model) build() {
 				if r.Group != nil { // ▤ a folder, ● a group; No group has neither
 					title = strings.Repeat("  ", r.Depth) + r.Group.KindMark() + " " + title
 				}
-				m.rows = append(m.rows, row{group: fmt.Sprintf("%s (%d)", title, r.Count), host: host})
+				gr := row{group: fmt.Sprintf("%s (%d)", title, r.Count), host: host}
+				if r.Group != nil {
+					gr.color = r.Group.Color
+				}
+				m.rows = append(m.rows, gr)
 				continue
 			}
 			m.rows = append(m.rows, row{host: host, s: r.Session, waiting: waiting[[2]string{host, r.Session.ID}]})

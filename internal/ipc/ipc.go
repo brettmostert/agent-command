@@ -299,12 +299,12 @@ const (
 	MutMove           = "session.move"      // IDs, GroupID
 	MutGroupCreate    = "group.create"      // Text (name), Color -> returns the group
 	MutGroupRename    = "group.rename"      // GroupID, Text
-	MutGroupColor     = "group.color"       // GroupID, Color
+	MutGroupColor     = "group.color"       // GroupID, Color: a theme color, bright-<one>, fixed-<name> or #RRGGBB (core.NormalizeColor)
 	MutGroupPath      = "group.path"        // GroupID, Path: make it a folder, or ("") a group
 	MutGroupNest      = "group.nest"        // GroupID, ParentID: put it inside a group, or ("") at the top
 	MutGroupDelete    = "group.delete"      // GroupID
 	MutGroupArchive   = "group.archive"     // GroupID (archives its sessions too)
-	MutGroupUnarchive = "group.unarchive"   // GroupID, Flag = also unarchive sessions
+	MutGroupUnarchive = "group.unarchive"   // GroupID, Flag = also unarchive sessions, Text = come back under this name
 	MutGroupCollapse  = "group.collapse"    // GroupID ("" = all), Flag = collapsed
 	MutGroupMove      = "group.move"        // GroupID, After or Before: the group it goes next to
 	MutViewMode       = "view.mode"         // Text: groups|list

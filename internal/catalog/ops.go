@@ -132,12 +132,12 @@ func localOps() []Op {
 		// Groups.
 		mut(act(ipc.MutGroupCreate, "Creates a group, with a name and a color; with a path, a folder (the path is made if it's missing).", entities, nil, ipc.Group{})).retryable(),
 		mut(act(ipc.MutGroupRename, "Renames a group.", entities, nil, nil)),
-		mut(act(ipc.MutGroupColor, "Sets a group's color.", entities, nil, nil)),
+		mut(act(ipc.MutGroupColor, "Sets a group's color: a theme color, its bright version, a fixed color, or #RRGGBB.", entities, nil, nil)),
 		mut(act(ipc.MutGroupNest, "Puts a group inside another, two levels deep, or (with no parent) at the top.", entities, nil, nil)),
 		mut(act(ipc.MutGroupPath, "Makes a group a folder with a path, made if it's missing, or (with no path) a group again.", entities, nil, nil)),
 		mut(act(ipc.MutGroupDelete, "Deletes a group, and archives its sessions.", entities, nil, nil).destructive()),
 		mut(act(ipc.MutGroupArchive, "Archives a group and its sessions.", entities, nil, nil)),
-		mut(act(ipc.MutGroupUnarchive, "Unarchives a group, and optionally its sessions.", entities, nil, nil)),
+		mut(act(ipc.MutGroupUnarchive, "Unarchives a group, and optionally its sessions, under a new name if one is given.", entities, nil, nil)),
 		mut(act(ipc.MutGroupCollapse, "Collapses or expands a group, or every group.", entities, nil, nil)),
 		mut(act(ipc.MutGroupMove, "Moves a group to just after or just before another one.", entities, nil, nil)),
 

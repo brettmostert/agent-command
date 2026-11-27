@@ -62,6 +62,14 @@ extension UsesSharedSpeech {
             return s
         }
 
+        @Test func withNothingSelectedTheCursorStartsOnTheFirstSessionNotAHeader() throws {
+            let s = try grouped()
+            s.setSidebarFocused(true)
+            #expect(s.cursorID == "a" && s.selectedGroupKey == nil, "taking the keyboard selects nothing")
+            s.moveCursor(by: -1)
+            #expect(s.cursorID == "group:web" && s.selectedGroupKey == "web", "↑ still reaches the header")
+        }
+
         @Test func aHeaderIsSelectedAndTheCursorStopsOnIt() throws {
             let s = try grouped()
             #expect(s.cursorIDs == ["group:web", "a", "b", "group:ops", "c", "d"], "No group isn't a stop")

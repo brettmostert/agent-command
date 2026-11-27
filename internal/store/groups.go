@@ -16,12 +16,10 @@ var (
 	ErrEmptyName     = errors.New("group name is empty")
 )
 
-// Palette is the round-robin color order for new groups.
-var Palette = []string{"blue", "magenta", "cyan", "yellow", "green", "red"}
-
 const groupCols = `id, name, color, sort_key, collapsed, created_at, archived_at, path, parent_id`
 
-// CreateGroup adds a group. An empty color is assigned from Palette; new
+// CreateGroup adds a group. An empty color is the next of the theme's
+// colors (core.ThemeColors); new
 // groups sort after existing ones.
 func (s *Store) CreateGroup(ctx context.Context, name, color string) (*core.Group, error) {
 	name = strings.TrimSpace(name)
@@ -35,7 +33,7 @@ func (s *Store) CreateGroup(ctx context.Context, name, color string) (*core.Grou
 			return err
 		}
 		if g.Color == "" {
-			g.Color = Palette[count%len(Palette)]
+			g.Color = core.ThemeColors[count%len(core.ThemeColors)]
 		}
 		g.SortKey = maxKey + 10
 		_, err := tx.ExecContext(ctx, `INSERT INTO groups (`+groupCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,

@@ -86,7 +86,7 @@ func (m Model) lines(width int) []string {
 		case r.section != "":
 			line = bold + r.section + reset
 		case r.group != "":
-			line = "  " + r.group
+			line = "  " + colored(r.group, r.color)
 		default:
 			line = "    " + sessionLine(r)
 		}
@@ -148,4 +148,28 @@ func (m Model) prompt() string {
 		return "new session " + where + ", in folder: " + m.input + "▏ (enter starts, esc cancels)"
 	}
 	return keysHelp
+}
+
+// colored draws s in a group color: a theme color in the terminal's own
+// ANSI color, a fixed or custom one in 24-bit color. The terminal's
+// background isn't known, so a fixed color takes its dark-theme value.
+func colored(s, color string) string {
+	if hex, ok := core.ColorHex(color, true); ok {
+		var r, g, b int
+		if _, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); err == nil {
+			return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s%s", r, g, b, s, reset)
+		}
+		return s
+	}
+	base := 30
+	name := color
+	if after, ok := strings.CutPrefix(color, "bright-"); ok {
+		base, name = 90, after
+	}
+	for i, n := range []string{"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"} {
+		if n == name {
+			return fmt.Sprintf("\x1b[%dm%s%s", base+i, s, reset)
+		}
+	}
+	return s
 }

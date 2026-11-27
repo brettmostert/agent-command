@@ -207,6 +207,27 @@ func resolveGroupOn(snap snapshot, sel, host string) (*core.Group, error) {
 	return nil, fmt.Errorf("no group named %q", sel)
 }
 
+// liveGroupOn is resolveGroupOn for a group sessions go into. An archived
+// group is refused, by id or by name, before anything is sent: making a
+// new group with its name would leave it no name to come back to.
+func liveGroupOn(snap snapshot, sel, host string) (*core.Group, error) {
+	g, err := resolveGroupOn(snap, sel, host)
+	if err == nil && g.ArchivedAt.IsZero() {
+		return g, nil
+	}
+	sel = strings.TrimSpace(sel)
+	for _, a := range snap.Groups {
+		if a.Host == host && !a.ArchivedAt.IsZero() && (a.ID == sel || strings.EqualFold(a.Name, sel)) {
+			return nil, archivedGroupError{fmt.Errorf("%s is archived: unarchive it first (acmd group unarchive %s)", a.Name, shellQuote(a.Name))}
+		}
+	}
+	return nil, err
+}
+
+// archivedGroupError is liveGroupOn's refusal: it's never an invitation to
+// make the group.
+type archivedGroupError struct{ error }
+
 // confirm asks a yes/no question on a terminal; without a terminal it
 // requires --yes.
 func confirm(in io.Reader, out io.Writer, yes bool, question string) error {
@@ -228,4 +249,18 @@ func confirm(in io.Reader, out io.Writer, yes bool, question string) error {
 // /dev/null is one, and it's the input of anything the app or launchd runs.
 func isTerminal(f *os.File) bool {
 	return xterm.IsTerminal(f.Fd())
+}
+
+// hasCode is whether err is the daemon's error with code.
+func hasCode(err error, code string) bool {
+	var re *ipc.RemoteError
+	return errors.As(err, &re) && re.Code == code
+}
+
+// shellQuote quotes s for a command to copy, when it needs it.
+func shellQuote(s string) string {
+	if s != "" && !strings.ContainsAny(s, " \t\n'\"\\$`!*?[]{}()<>|&;#~") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

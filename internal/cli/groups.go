@@ -160,7 +160,7 @@ func newGroupCreateCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().StringVar(&color, "color", "", "blue, magenta, cyan, yellow, green or red (default: next in the palette)")
+	cmd.Flags().StringVar(&color, "color", "", "a theme color (blue, magenta, cyan, yellow, green, red, bright-<one>), a fixed one (orange, teal, pink…), or #RRGGBB (default: the next theme color)")
 	cmd.Flags().StringVar(&folder, "folder", "", "make it a folder at this path, made if it's missing: new sessions in it start there")
 	cmd.Flags().StringVar(&parentName, "parent", "", "make it inside this group (two levels deep); it starts in the parent's color")
 	return cmd
@@ -300,6 +300,7 @@ func groupSessions(snap snapshot, g *core.Group) (n, running int) {
 
 func newGroupUnarchiveCmd() *cobra.Command {
 	var sessions bool
+	var as string
 	cmd := &cobra.Command{
 		Use:   "unarchive <group>",
 		Short: "Bring an archived group back",
@@ -315,11 +316,21 @@ func newGroupUnarchiveCmd() *cobra.Command {
 				if g == nil {
 					return fmt.Errorf("no archived group named %q", args[0])
 				}
-				return c.mutate(ipc.Mutation{Kind: ipc.MutGroupUnarchive, GroupID: g.ID, Flag: sessions, Host: g.Host}, nil)
+				err := c.mutate(ipc.Mutation{Kind: ipc.MutGroupUnarchive, GroupID: g.ID, Flag: sessions, Host: g.Host, Text: as}, nil)
+				if as == "" && hasCode(err, ipc.CodeConflict) {
+					for _, x := range snap.Groups {
+						if x.Host == g.Host && x.ArchivedAt.IsZero() && strings.EqualFold(x.Name, g.Name) {
+							return fmt.Errorf("can't unarchive %s: the group %s (%s) has that name. Unarchive it under a new one: acmd group unarchive %s --as %s",
+								g.Name, x.Name, x.ID, shellQuote(g.ID), shellQuote(g.Name+" 2"))
+						}
+					}
+				}
+				return err
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&sessions, "sessions", false, "also unarchive the group's sessions (as paused)")
+	cmd.Flags().StringVar(&as, "as", "", "bring it back under this name (when another group has taken its own)")
 	return cmd
 }
 
@@ -334,15 +345,15 @@ func newGroupCollapseCmd(use string, collapsed bool) *cobra.Command {
 				return errors.New("give a group name or --all")
 			}
 			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
-				id := ""
+				m := ipc.Mutation{Kind: ipc.MutGroupCollapse, Flag: collapsed}
 				if !all {
 					g, err := resolveGroup(snap, args[0])
 					if err != nil {
 						return err
 					}
-					id = g.ID
+					m.GroupID = g.ID // collapse is the view's, not the host's: no host
 				}
-				return c.mutate(ipc.Mutation{Kind: ipc.MutGroupCollapse, GroupID: id, Flag: collapsed}, nil)
+				return c.mutate(m, nil)
 			})
 		},
 	}

@@ -233,7 +233,7 @@
     },
     {
       "name": "group.color",
-      "description": "Sets a group's color.",
+      "description": "Sets a group's color: a theme color, its bright version, a fixed color, or #RRGGBB.",
       "scope": "act",
       "kind": "change",
       "grant": "entities",
@@ -335,7 +335,7 @@
     },
     {
       "name": "group.unarchive",
-      "description": "Unarchives a group, and optionally its sessions.",
+      "description": "Unarchives a group, and optionally its sessions, under a new name if one is given.",
       "scope": "act",
       "kind": "change",
       "grant": "entities",

@@ -131,13 +131,20 @@ func (d *Daemon) mutate(ctx context.Context, m ipc.Mutation) (any, error) {
 	case ipc.MutGroupRename:
 		return nil, st.RenameGroup(ctx, m.GroupID, m.Text)
 	case ipc.MutGroupColor:
-		return nil, st.SetGroupColor(ctx, m.GroupID, m.Color)
+		color, err := groupColor(m.Color)
+		if err != nil {
+			return nil, err
+		}
+		if color == "" {
+			return nil, invalid("a color is needed")
+		}
+		return nil, st.SetGroupColor(ctx, m.GroupID, color)
 	case ipc.MutGroupDelete:
 		return nil, d.deleteGroup(ctx, m.GroupID)
 	case ipc.MutGroupArchive:
 		return nil, d.archiveGroup(ctx, m.GroupID)
 	case ipc.MutGroupUnarchive:
-		return nil, d.unarchiveGroup(ctx, m.GroupID, m.Flag)
+		return nil, d.unarchiveGroup(ctx, m.GroupID, m.Flag, m.Text)
 	case ipc.MutGroupCollapse:
 		if m.GroupID != "" {
 			return nil, st.SetGroupCollapsed(ctx, m.GroupID, m.Flag)
@@ -294,7 +301,8 @@ func bringBack(ctx context.Context, st *store.Store, id string) error {
 		if !g.ArchivedAt.IsZero() {
 			err = st.SetGroupArchived(ctx, g.ID, false)
 			if errors.Is(err, store.ErrDuplicateName) {
-				return invalid("the group %q can't come back: another group has that name. Rename that one first", g.Name)
+				return &codedError{code: ipc.CodeConflict, err: fmt.Errorf("the group %q can't come back: another group has that name. "+
+					"Unarchive it under a new name, or rename the other one first", g.Name)}
 			}
 			if err != nil {
 				return err
@@ -323,7 +331,10 @@ func family(ctx context.Context, st *store.Store, id string) ([]string, error) {
 // unarchiveGroup brings back a group and the groups inside it, and its
 // parent if that's archived; with sessions, the sessions in all of them too,
 // as paused. All or nothing.
-func (d *Daemon) unarchiveGroup(ctx context.Context, id string, sessions bool) error {
+//
+// With a name, it comes back under that name: for when another group has
+// taken its own.
+func (d *Daemon) unarchiveGroup(ctx context.Context, id string, sessions bool, name string) error {
 	return d.store.WithTx(ctx, func(st *store.Store) error {
 		ids, err := family(ctx, st, id)
 		if err != nil {
@@ -331,6 +342,11 @@ func (d *Daemon) unarchiveGroup(ctx context.Context, id string, sessions bool) e
 		}
 		if _, err := st.Group(ctx, id); err != nil {
 			return err
+		}
+		if strings.TrimSpace(name) != "" {
+			if err := st.RenameGroup(ctx, id, name); err != nil {
+				return err
+			}
 		}
 		for _, gid := range ids {
 			if err := bringBack(ctx, st, gid); err != nil {
@@ -419,6 +435,10 @@ func lastKey(ctx context.Context, st *store.Store, parent string) int {
 // it's missing, before anything is saved.
 // Inside a parent, it starts in the parent's color unless one is given.
 func (d *Daemon) createGroup(ctx context.Context, name, color, path, parent string) (*core.Group, error) {
+	color, err := groupColor(color)
+	if err != nil {
+		return nil, err
+	}
 	if parent != "" {
 		if err := checkParent(ctx, d.store, parent); err != nil {
 			return nil, err
@@ -428,13 +448,12 @@ func (d *Daemon) createGroup(ctx context.Context, name, color, path, parent stri
 		}
 	}
 	if path != "" {
-		var err error
 		if path, err = makeFolder(path); err != nil {
 			return nil, err
 		}
 	}
 	var g *core.Group
-	err := d.store.WithTx(ctx, func(st *store.Store) error {
+	err = d.store.WithTx(ctx, func(st *store.Store) error {
 		var err error
 		if g, err = st.CreateGroup(ctx, name, color); err != nil {
 			return err
@@ -616,4 +635,16 @@ func (d *Daemon) moveGroup(ctx context.Context, id, after, before string) error 
 		}
 	}
 	return nil
+}
+
+// groupColor checks a group color from a client ("" is none given).
+func groupColor(c string) (string, error) {
+	if strings.TrimSpace(c) == "" {
+		return "", nil
+	}
+	color, err := core.NormalizeColor(c)
+	if err != nil {
+		return "", invalid("%v", err)
+	}
+	return color, nil
 }

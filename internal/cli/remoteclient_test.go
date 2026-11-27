@@ -103,6 +103,10 @@ func (f *fakeDaemon) serve(c net.Conn) {
 			resp = ipc.Response{Error: "unknown op " + req.Op}
 		} else if v, err := fn(req.Data); err != nil {
 			resp = ipc.Response{Error: err.Error()}
+			var re *ipc.RemoteError
+			if errors.As(err, &re) {
+				resp.Error, resp.Code = re.Msg, re.Code
+			}
 		} else if v != nil {
 			b, _ := json.Marshal(v)
 			resp.Data = b

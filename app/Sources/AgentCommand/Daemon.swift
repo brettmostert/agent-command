@@ -203,8 +203,21 @@ nonisolated struct SessionGroup: Decodable, Identifiable, Equatable {
         parent = try c.decodeIfPresent(String.self, forKey: .parent) ?? ""
     }
 
-    /// The colours a group can have, in the daemon's order.
-    static let colors = ["blue", "magenta", "cyan", "yellow", "green", "red"]
+    /// name, or name and the first number after it that no group in taken
+    /// has: "Backend 2", then "Backend 3".
+    static func freeName(_ name: String, taken: [String]) -> String {
+        let used = Set(taken.map { $0.lowercased() })
+        guard used.contains(name.lowercased()) else { return name }
+        var base = name
+        var n = 2
+        // "Backend 2" taken too: carry on from its number.
+        if let space = name.lastIndex(of: " "), let at = Int(name[name.index(after: space)...]) {
+            base = String(name[..<space])
+            n = at + 1
+        }
+        while used.contains("\(base) \(n)".lowercased()) { n += 1 }
+        return "\(base) \(n)"
+    }
 
     /// The daemon leaves the time out for a group that isn't archived.
     var isArchived: Bool { !archivedAt.isEmpty }

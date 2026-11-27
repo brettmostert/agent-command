@@ -260,7 +260,7 @@ func TestGroups(t *testing.T) {
 	}
 	g2, _ := s.CreateGroup(ctx, "billing", "")
 	g3, _ := s.CreateGroup(ctx, "custom color", "red")
-	if g1.Name != "PROJ-123 auth" || g1.Color != Palette[0] || g2.Color != Palette[1] || g3.Color != "red" {
+	if g1.Name != "PROJ-123 auth" || g1.Color != core.ThemeColors[0] || g2.Color != core.ThemeColors[1] || g3.Color != "red" {
 		t.Errorf("names/colors: %q %q %q %q", g1.Name, g1.Color, g2.Color, g3.Color)
 	}
 	if _, err := s.CreateGroup(ctx, "proj-123 AUTH", ""); !errors.Is(err, ErrDuplicateName) {
