@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.96.0](https://github.com/brettmostert/agent-command/compare/v0.95.0...v0.96.0) (2026-11-27)
+
+
+### Features
+
+* nested groups: a group or folder can be inside another, two levels deep ([#215](https://github.com/brettmostert/agent-command/issues/215)) ([cb86615](https://github.com/brettmostert/agent-command/commit/cb8661583828a2b49145681e4d9e8dd101dd9213))
+
 ## [0.95.0](https://github.com/brettmostert/agent-command/compare/v0.94.3...v0.95.0) (2026-11-27)
 
 
