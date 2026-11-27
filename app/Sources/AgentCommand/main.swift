@@ -91,7 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     self.store.setRemote(self.store.actionTargets(forRow: session), on)
                 },
                 newGroup: { [weak self] sessions in self?.showNewGroup(sessions) },
-                renameGroup: { [weak self] group in self?.showRenameGroup(group) }
+                renameGroup: { [weak self] group in self?.showRenameGroup(group) },
+                clickGroup: { [weak self] group in self?.clickSidebarGroup(group) },
+                archiveGroup: { [weak self] group in self?.archiveGroup(group.key) }
             ))
         let split = NSSplitViewController()
         split.splitView = ThemedSplitView()
@@ -390,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             title: direction == .right ? "Split right with" : "Split down with",
             picker: NewSessionPicker(hosts: host.map { [$0] } ?? [], host: host, client: store.remoteClient),
             close: { [weak self] in self?.closePopup() },
-            choose: { [weak self] harness, _, _ in
+            choose: { [weak self] harness, _, _, _ in
                 self?.closePopup()
                 self?.splitPane(direction, harness: harness)
             }
@@ -422,7 +424,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case .toggleMark: store.toggleMarkAtCursor()
         case .leave: pane?.focusTerminal()
         case .open:
-            if let id = store.cursorID { openSidebarRow(id) }
+            guard let id = store.cursorID else { return }
+            if let group = SidebarLayout.groupKey(cursor: id) { store.toggleCollapsed(group) } else { openSidebarRow(id) }
+        case .collapse, .expand:
+            // On a group's header only.
+            if let group = store.cursorID.flatMap(SidebarLayout.groupKey(cursor:)) { store.setCollapsed(group, key == .collapse) }
         case .number(let n): showSession(number: n)
         case .nextAttention: showNextAttention()
         }
@@ -450,6 +456,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             NSApp.hide(nil)
         } else {
             showMainWindow()
+        }
+    }
+
+    /// A click on a group's header selects the group, with the sidebar's keyboard.
+    private func clickSidebarGroup(_ group: SessionGroup) {
+        window?.makeFirstResponder(sidebarKeys)
+        store.selectGroup(group.key)
+    }
+
+    /// Asks, then archives a group and its sessions.
+    private func archiveGroup(_ key: String) {
+        guard let group = store.group(key: key), !group.isDefault else { return }
+        let prompt = Palette.groupArchivePrompt(group, sessions: store.members(ofGroup: key))
+        let alert = NSAlert()
+        alert.messageText = prompt.title
+        alert.informativeText = prompt.note
+        alert.addButton(withTitle: "Archive")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.archiveGroup(key)
         }
     }
 
@@ -545,14 +571,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// offering to make it the default.
     @objc private func newDefaultSession() {
         if let harness = DefaultHarness.current {
-            newSession(harness: harness)
+            newInContext(harness: harness)
         } else {
             askHarness(firstTime: true)
         }
     }
 
     /// ⇧⌘T: a terminal, with the folder panel's Remote checkbox.
-    @objc private func newTerminal() { newSession(harness: .terminal, asksRemote: true) }
+    @objc private func newTerminal() { newInContext(harness: .terminal, asksRemote: true) }
+
+    /// A session in the group you're in (SessionStore.newSessionGroup). A host's
+    /// group starts it on that host, with the host's folders.
+    private func newInContext(harness: Harness, asksRemote: Bool = false) {
+        let group = store.newSessionGroup
+        if let group, !group.host.isEmpty {
+            startOnHost(group.host, harness: harness, group: .existing(group))
+        } else {
+            newSession(harness: harness, asksRemote: asksRemote, group: .existing(group))
+        }
+    }
+
+    /// The host's folders, then the session, with the harness if the host has
+    /// one of its kind, else the host's default. A terminal stays a terminal:
+    /// the host says why if it can't run one.
+    private func startOnHost(_ host: String, harness: Harness, group: NewSessionGroup) {
+        store.remoteClient.harnesses(host: host) { [weak self] result in
+            var pick = harness
+            if case .success(let found) = result, harness != .terminal {
+                pick = found.known.first { $0.request.kind == harness.request.kind } ?? found.defaultHarness ?? harness
+            }
+            self?.chooseRemoteFolder(host: host, harness: pick, group: group)
+        }
+    }
+
+    /// The group's id, making it first if it's new; nil is the host's Default.
+    private func withGroup(_ group: NewSessionGroup, on host: String, _ start: @escaping (String?) -> Void) {
+        switch group {
+        case .existing(let found): start(found.flatMap { $0.isDefault ? nil : $0.id })
+        case .new(let name): store.createGroup(name, on: host) { start($0.id) }
+        }
+    }
 
     /// A popup asking where and which harness, then the folder.
     @objc private func chooseHarness() { askHarness(firstTime: false) }
@@ -563,35 +621,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         showMainWindow()
         // ⌘N's first question is only about this Mac.
         let hosts = firstTime ? [] : store.remoteHosts.map(\.name)
+        // It starts where ⌘N would: in the group you're in, on its host.
+        let group = store.newSessionGroup
+        let start = host ?? group.flatMap { $0.host.isEmpty ? nil : $0.host }
         showPopup(HarnessPickerView(
             title: "New session",
             offersDefault: DefaultHarness.current == nil,
-            picker: NewSessionPicker(hosts: hosts, host: host, client: store.remoteClient),
+            picker: NewSessionPicker(hosts: hosts, host: start, client: store.remoteClient,
+                                     groups: firstTime ? [] : store.groups, group: group),
             close: { [weak self] in self?.closePopup() },
-            choose: { [weak self] harness, makeDefault, host in
+            choose: { [weak self] harness, makeDefault, host, group in
                 self?.closePopup()
                 if makeDefault { self?.setDefaultHarness(harness) }
-                if let host {
-                    self?.chooseRemoteFolder(host: host, harness: harness)
+                if firstTime {
+                    // ⌘N's first time asks only what to start: the rest is ⌘N's.
+                    DispatchQueue.main.async { self?.newInContext(harness: harness) }
+                } else if let host {
+                    self?.chooseRemoteFolder(host: host, harness: harness, group: group)
                 } else {
-                    // After closing, as the folder panel is modal. ⌘N's first time doesn't ask about Remote.
-                    DispatchQueue.main.async { self?.newSession(harness: harness, asksRemote: !firstTime) }
+                    // After closing, as the folder panel is modal.
+                    DispatchQueue.main.async { self?.newSession(harness: harness, asksRemote: true, group: group) }
                 }
             }
         ))
     }
 
     /// The host's folders, for a session on it. It's created there, Remote, and shown here.
-    private func chooseRemoteFolder(host: String, harness: Harness) {
+    private func chooseRemoteFolder(host: String, harness: Harness, group: NewSessionGroup = .existing(nil)) {
         let chooser = RemoteFolderChooser(host: host, client: store.remoteClient)
         chooser.choose = { [weak self, weak chooser] dir in
-            self?.store.newRemoteSession(host: host, dir: dir, harness: harness, done: { failure in
-                if let failure, let chooser {
-                    chooser.fail(failure)
-                } else {
-                    self?.closePopup()
-                }
-            })
+            self?.withGroup(group, on: host) { id in
+                self?.store.newRemoteSession(host: host, dir: dir, harness: harness, group: id, done: { failure in
+                    if let failure, let chooser {
+                        chooser.fail(failure)
+                    } else {
+                        self?.closePopup()
+                    }
+                })
+            }
         }
         showPopup(RemoteFolderView(model: chooser, harness: harness, close: { [weak self] in self?.closePopup() }))
     }
@@ -608,7 +675,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// The folder panel, then the session. asksRemote adds the Remote checkbox, which
     /// starts from `new_sessions_remote`; without it (⌘N) the daemon uses that setting.
-    private func newSession(harness: Harness, asksRemote: Bool = false) {
+    /// group is the group it goes in.
+    private func newSession(harness: Harness, asksRemote: Bool = false, group: NewSessionGroup = .existing(nil)) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -630,7 +698,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         lastFolder = url
-        store.newSession(harness: harness, in: url.path, remote: asksRemote ? remoteBox.state == .on : nil)
+        let remote = asksRemote ? remoteBox.state == .on : nil
+        withGroup(group, on: "") { [weak self] id in
+            self?.store.newSession(harness: harness, in: url.path, remote: remote, group: id)
+        }
     }
 
     /// A popup to pick an earlier Claude or Antigravity conversation, or enter its id.
@@ -1127,6 +1198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let popup = PopupSettings.shared
         let state = PaletteState(
             targets: targets, sessions: store.sessions, needsYou: store.nextAttentionID != nil, setMembers: store.setMembers, groups: store.groups,
+            group: store.selectedGroupKey.flatMap(store.group(key:))
+                ?? (targets.count == 1 ? store.group(key: targets[0].groupKey ?? SessionGroup.key(targets[0].hostName, "default")) : nil),
+            focusedGroup: store.focusedGroup,
             paneCount: pane?.tree.shownLeaves.count ?? 0, showsScreen: pane?.shown != nil,
             speechOn: speech.isEnabled, speaking: speech.isSpeaking, agentRemoteControl: AgentRemoteControlSetting.isOn,
             hostingOn: remote.hostingOn,
@@ -1149,13 +1223,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case .copy(let text): Self.copyToPasteboard(text)
         case .select(let id): store.selectedID = id
         case .nextAttention: showNextAttention()
-        case .newSession(let id): if let harness = Harness.allCases.first(where: { $0.id == id }) { newSession(harness: harness) }
+        case .newSession(let id): if let harness = Harness.allCases.first(where: { $0.id == id }) { newInContext(harness: harness) }
         case .chooseHarness: chooseHarness()
         case .resume: resumeSession()
         case .newGroup(let sessions): showNewGroup(sessions)
         case .moveToGroup(let sessions, let group):
             store.moveSessions(sessions.map(\.id), to: group)
             store.clearMarks()
+        case .focusGroup(let key): store.focusGroup(key)
+        case .archiveGroup(let key): archiveGroup(key)
         case .split(let direction, let how):
             switch how {
             case .terminal: splitPane(direction)

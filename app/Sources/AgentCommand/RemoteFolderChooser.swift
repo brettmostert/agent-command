@@ -1,8 +1,36 @@
 import Foundation
 import Observation
 
+/// The group a new session goes in: one that's there (nil: its host's
+/// Default), or one to make with this name.
+nonisolated enum NewSessionGroup: Equatable {
+    case existing(SessionGroup?)
+    case new(String)
+}
+
+/// A line of ⇧⌘N's group list.
+nonisolated enum NewSessionGroupRow: Equatable, Identifiable {
+    case group(SessionGroup)
+    /// Make a group with the name typed: "" until there is one.
+    case new(String)
+
+    var id: String {
+        switch self {
+        case .group(let group): group.key
+        case .new: "new"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .group(let group): group.isDefault ? "Default" : group.name
+        case .new(let name): name.isEmpty ? "New group…" : "New group “\(name)”"
+        }
+    }
+}
+
 /// ⌘⇧N's choices before the folder: where the session runs (this Mac or a
-/// Remote host) and what it runs. A host's harnesses and default come from it.
+/// Remote host), what it runs, and its group. A host's harnesses and default come from it.
 @Observable final class NewSessionPicker {
     /// The known hosts' names: where a session can run, after this Mac.
     let hosts: [String]
@@ -14,11 +42,88 @@ import Observation
     private(set) var error: String?
     @ObservationIgnored let client: RemoteHostsClient
     @ObservationIgnored private var generation = 0
+    /// Every host's live groups. None: there's no group line.
+    let groups: [SessionGroup]
+    /// The group it goes in.
+    private(set) var group = NewSessionGroup.existing(nil)
+    /// Whether the group list (⌘G) is open, instead of the harnesses.
+    private(set) var choosingGroup = false
+    /// What's typed while the group list is open: it narrows the list, and names a new group.
+    var groupSearch = "" {
+        didSet { groupCursor = 0 }
+    }
+    private(set) var groupCursor = 0
 
-    init(hosts: [String], host: String? = nil, client: RemoteHostsClient = RemoteHostsClient()) {
+    init(hosts: [String], host: String? = nil, client: RemoteHostsClient = RemoteHostsClient(),
+         groups: [SessionGroup] = [], group: SessionGroup? = nil) {
         self.hosts = hosts
         self.client = client
+        self.groups = groups
         setHost(host.flatMap { hosts.contains($0) ? $0 : nil })
+        if let group, group.host == (self.host ?? "") { self.group = .existing(group) }
+    }
+
+    /// What opens and closes the group list.
+    static let groupKey = KeyCombo("cmd+g")
+
+    /// The chosen host's groups, Default last.
+    var hostGroups: [SessionGroup] { SidebarLayout.orderedGroups(groups).filter { $0.host == (host ?? "") } }
+
+    /// The group line's text.
+    var groupTitle: String {
+        switch group {
+        case .existing(let group?): group.isDefault ? "Default" : group.name
+        case .existing(nil): "Default"
+        case .new(let name): name + " (new)"
+        }
+    }
+
+    /// The group's colour, if it has one yet.
+    var groupColor: String? {
+        if case .existing(let group?) = group { return group.color }
+        return nil
+    }
+
+    /// The group list: the host's groups that match what's typed, then a new one.
+    var groupRows: [NewSessionGroupRow] {
+        let typed = groupSearch.trimmingCharacters(in: .whitespaces)
+        let shown = hostGroups.filter { typed.isEmpty || NewSessionGroupRow.group($0).title.localizedCaseInsensitiveContains(typed) }
+        let exact = shown.contains { NewSessionGroupRow.group($0).title.caseInsensitiveCompare(typed) == .orderedSame }
+        return shown.map(NewSessionGroupRow.group) + (exact ? [] : [.new(typed)])
+    }
+
+    func toggleGroups() {
+        choosingGroup.toggle()
+        groupSearch = ""
+        if choosingGroup, case .existing(let current) = group {
+            let key = current?.key ?? hostGroups.first(where: \.isDefault)?.key
+            groupCursor = groupRows.firstIndex { $0.id == key } ?? 0
+        }
+    }
+
+    func moveGroupCursor(_ step: Int) {
+        let count = groupRows.count
+        guard count > 0 else { return }
+        groupCursor = max(0, min(count - 1, groupCursor + step))
+    }
+
+    /// Takes a group row: false when it's a new group with no name yet.
+    @discardableResult func pickGroup(_ row: NewSessionGroupRow) -> Bool {
+        switch row {
+        case .group(let picked): group = .existing(picked)
+        case .new(let name):
+            guard !name.isEmpty else { return false }
+            group = .new(name)
+        }
+        choosingGroup = false
+        groupSearch = ""
+        return true
+    }
+
+    /// Takes the row the cursor is on.
+    @discardableResult func pickGroupAtCursor() -> Bool {
+        let rows = groupRows
+        return rows.indices.contains(groupCursor) && pickGroup(rows[groupCursor])
     }
 
     /// Where, in order: nil (this Mac), then each host.
@@ -32,6 +137,9 @@ import Observation
     func setHost(_ name: String?) {
         host = name
         error = nil
+        // A group is on one host: on another, it's that host's Default. A new
+        // group is made where the session runs.
+        if case .existing(let current?) = group, current.host != (name ?? "") { group = .existing(nil) }
         generation += 1
         guard let name else {
             loading = false
@@ -66,9 +174,14 @@ import Observation
     func select(_ harness: Harness) { choice.select(harness) }
     func setSearch(_ text: String) -> Harness? { choice.setSearch(text) }
 
-    /// tab and shift-tab change where; so do left and right with nothing typed.
+    /// ⌘G opens or closes the group list. tab and shift-tab change where; so do
+    /// left and right with nothing typed.
     func handle(_ combo: KeyCombo) -> Bool {
-        guard !hosts.isEmpty else { return false }
+        if combo == Self.groupKey, !groups.isEmpty {
+            toggleGroups()
+            return true
+        }
+        guard !hosts.isEmpty, !choosingGroup else { return false }
         if combo == KeyCombo("tab") { movePlace(1); return true }
         if combo == KeyCombo("shift+tab") { movePlace(-1); return true }
         guard choice.search.isEmpty else { return false }

@@ -28,3 +28,11 @@ import Testing
     #expect(SidebarKey.from(keyCode: 7, flags: [], keys: keys) == nil)
     #expect(SidebarKey.from(keyCode: 46, flags: [], keys: keys) == .toggleMark, "rebound to m")
 }
+
+@Test func leftAndRightCollapseAndExpandAGroup() {
+    let keys = Keymap()
+    #expect(SidebarKey.from(keyCode: 123, flags: [], keys: keys) == .collapse, "←")
+    #expect(SidebarKey.from(keyCode: 124, flags: [], keys: keys) == .expand, "→")
+    #expect(SidebarKey.from(keyCode: Key.h, flags: [], keys: keys) == .collapse)
+    #expect(SidebarKey.from(keyCode: Key.l, flags: [], keys: keys) == .expand)
+}

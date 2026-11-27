@@ -187,3 +187,43 @@ private func entry(_ entries: [PaletteEntry], _ section: String, _ title: String
     #expect(entry(both, "2 sessions", "Move to api")?.action == .moveToGroup([a, b], group: "api"), "b isn't in it yet")
     #expect(entry(both, "2 sessions", "Move to a new group…")?.action == .newGroup([a, b]))
 }
+
+// MARK: Groups (PAN-180)
+
+@Test func theGroupsCommandsFocusAndArchiveTheGroupYoureIn() {
+    let web = SessionGroup(id: "web", name: "web")
+    let def = SessionGroup(id: "default", name: "Default", isDefault: true)
+    var state = PaletteState(group: web)
+    var entries = Palette.entries(state)
+    #expect(titles(entries, in: "Groups") == ["Focus web", "Archive group web…"])
+    #expect(entry(entries, "Groups", "Focus web")?.action == .focusGroup("web"))
+    #expect(entry(entries, "Groups", "Archive group web…")?.action == .archiveGroup("web"))
+
+    state.focusedGroup = web
+    entries = Palette.entries(state)
+    #expect(titles(entries, in: "Groups") == ["Leave focus on web", "Archive group web…"], "no Focus for the group already focused")
+    #expect(entry(entries, "Groups", "Leave focus on web")?.action == .focusGroup(nil))
+
+    state.group = def
+    #expect(titles(Palette.entries(state), in: "Groups") == ["Leave focus on web", "Focus Default"], "Default can't be archived")
+    #expect(titles(Palette.entries(PaletteState()), in: "Groups").isEmpty)
+}
+
+@Test func archivingAGroupSaysWhatStopsAndWhatCanComeBack() throws {
+    let web = SessionGroup(id: "web", name: "web")
+    let running = try makeSession(id: "a", status: "busy")
+    let paused = try makeSession(id: "b", status: "paused")
+    let shell = try makeSession(id: "c", harness: "terminal", status: "busy")
+
+    let one = Palette.groupArchivePrompt(web, sessions: [paused])
+    #expect(one.title == "Archive web and its 1 session?")
+    #expect(one.note == "Agents' conversations are kept: you can unarchive the group and its sessions later.")
+
+    let three = Palette.groupArchivePrompt(web, sessions: [running, paused, shell])
+    #expect(three.title == "Archive web and its 3 sessions?")
+    #expect(three.note.hasPrefix("2 running sessions will be stopped. Terminals end"))
+
+    let none = Palette.groupArchivePrompt(SessionGroup(id: "g", name: "ops", host: "studio"), sessions: [])
+    #expect(none.title == "Archive ops · studio?" && none.note == "It's archived on studio, its host.")
+    #expect(Palette.groupArchivePrompt(web, sessions: [running]).note.hasPrefix("1 running session will be stopped."))
+}

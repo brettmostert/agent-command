@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/brettmostert/agent-command/internal/core"
@@ -108,4 +109,46 @@ func TestArchivingAGroupIsAllOrNothing(t *testing.T) {
 func hasCode(err error, code string) bool {
 	var re *ipc.RemoteError
 	return errors.As(err, &re) && re.Code == code
+}
+
+func TestUnarchivingASessionBringsBackItsGroup(t *testing.T) {
+	p := testPaths(t)
+	start(t, p)
+	c := dial(t, p)
+	ids := seedHosted(t, p, "a", "b")
+	var g ipc.Group
+	must(t, c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "G"}, &g))
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(ids...), GroupID: g.ID})
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: g.ID})
+
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutUnarchive, Targets: ipc.Here(ids[0])})
+	if groupArchived(t, c, g.ID) {
+		t.Error("the session's group is still archived")
+	}
+	if n := archivedCount(t, c, "a", "b"); n != 1 {
+		t.Errorf("want only b still archived, got %d archived", n)
+	}
+	if s := byClaude(snapshot(t, c), "a"); s.GroupID != g.ID {
+		t.Errorf("a is in %s, not its group", s.GroupID)
+	}
+}
+
+func TestUnarchivingASessionWhoseGroupsNameIsTaken(t *testing.T) {
+	p := testPaths(t)
+	start(t, p)
+	c := dial(t, p)
+	ids := seedHosted(t, p, "a")
+	var g ipc.Group
+	must(t, c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "G"}, &g))
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutMove, Targets: ipc.Here(ids...), GroupID: g.ID})
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupArchive, GroupID: g.ID})
+	mutate(t, c, ipc.Mutation{Kind: ipc.MutGroupCreate, Text: "g"}) // the name, live again
+
+	err := c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutUnarchive, Targets: ipc.Here(ids[0])}, nil)
+	if !hasCode(err, ipc.CodeInvalid) || !strings.Contains(err.Error(), "another group has that name") {
+		t.Fatalf("want invalid naming the clash, got %v", err)
+	}
+	if archivedCount(t, c, "a") != 1 || !groupArchived(t, c, g.ID) {
+		t.Error("a failed unarchive changed the session or its group")
+	}
 }

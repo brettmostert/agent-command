@@ -23,6 +23,10 @@ nonisolated enum PaletteAction: Equatable {
     case newGroup([Session])
     /// Moves sessions (with their sets) to a group, by id.
     case moveToGroup([Session], group: String)
+    /// Opens one group and collapses the others, by key; nil leaves focus.
+    case focusGroup(String?)
+    /// Asks, then archives a group and its sessions, by key.
+    case archiveGroup(String)
     case closePane
     case focus(FocusDirection)
     case equalizePanes
@@ -77,6 +81,10 @@ struct PaletteState {
     var setMembers: [[String]] = []
     /// The groups sessions can move to.
     var groups: [SessionGroup] = []
+    /// The group the commands act on: the one selected, else the session's.
+    var group: SessionGroup?
+    /// The group you focused.
+    var focusedGroup: SessionGroup?
     var paneCount = 0
     /// Whether a terminal is showing, for the Screen commands.
     var showsScreen = false
@@ -154,6 +162,7 @@ enum Palette {
                 list.append(PaletteEntry(section: section, title: "Copy \(what)", action: .copy(session.claudeSessionID)))
             }
         }
+        list += groupCommands(state)
         if state.needsYou {
             list.append(PaletteEntry(section: "Go to", title: "Next needing attention", shortcut: keys.label(.nextAttention), action: .nextAttention))
         }
@@ -237,6 +246,39 @@ enum Palette {
         list.append(PaletteEntry(section: "App", title: "Request a feature…", action: .report(.feature)))
         list.append(PaletteEntry(section: "App", title: "Quit", shortcut: keys.label(.quit), action: .quit))
         return list
+    }
+
+    /// Focusing the group, leaving focus, and archiving the group.
+    static func groupCommands(_ state: PaletteState) -> [PaletteEntry] {
+        var list: [PaletteEntry] = []
+        if let focused = state.focusedGroup {
+            list.append(PaletteEntry(section: "Groups", title: "Leave focus on \(focused.title)", action: .focusGroup(nil)))
+        }
+        guard let group = state.group else { return list }
+        if group.key != state.focusedGroup?.key {
+            list.append(PaletteEntry(section: "Groups", title: "Focus \(group.title)", key: group.key, action: .focusGroup(group.key)))
+        }
+        if !group.isDefault {
+            list.append(PaletteEntry(section: "Groups", title: "Archive group \(group.title)…", key: group.key, action: .archiveGroup(group.key)))
+        }
+        return list
+    }
+
+    /// The question and note of the alert that confirms archiving a group with these sessions in it.
+    static func groupArchivePrompt(_ group: SessionGroup, sessions: [Session]) -> (title: String, note: String) {
+        let count = sessions.count == 1 ? "its 1 session" : "its \(sessions.count) sessions"
+        let title = sessions.isEmpty ? "Archive \(group.title)?" : "Archive \(group.title) and \(count)?"
+        var notes: [String] = []
+        let running = sessions.filter { !["paused", "finished"].contains($0.status) }.count
+        if running > 0 { notes.append(running == 1 ? "1 running session will be stopped." : "\(running) running sessions will be stopped.") }
+        if sessions.contains(where: \.isTerminal) {
+            notes.append("Terminals end, along with everything running in them, and can't be brought back.")
+        }
+        if sessions.contains(where: { !$0.isTerminal }) {
+            notes.append("Agents' conversations are kept: you can unarchive the group and its sessions later.")
+        }
+        if !group.host.isEmpty { notes.append("It's archived on \(group.host), its host.") }
+        return (title, notes.joined(separator: " "))
     }
 
     /// Remote on or off for the targets on this Mac (on, unless all are already),

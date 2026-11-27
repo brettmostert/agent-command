@@ -321,3 +321,77 @@ extension UsesSharedSpeech.GroupCallsTests {
         #expect(Set(rows.map(\.id)).count == rows.count, "every row its own id")
     }
 }
+
+// MARK: Focus, the cursor, ⌘N's group and the Archived section (PAN-180)
+
+@Test func focusOpensOneGroupAndLeavingBringsBackWhatWasCollapsed() {
+    var options = SidebarOptions()
+    options.mode = .list
+    options.collapsed = ["web"]
+    options.focus("api", groups: groups)
+    #expect(options.focused == "api" && options.mode == .groups)
+    #expect(options.collapsed == ["default", "web", "old"], "every other group collapses")
+    options.focus("web", groups: groups)
+    #expect(options.collapsed == ["default", "api", "old"] && options.beforeFocus == ["web"], "focusing another keeps what was before")
+    options.clearFocus()
+    #expect(options.focused == nil && options.beforeFocus == nil && options.collapsed == ["web"])
+    options.clearFocus()
+    #expect(options.collapsed == ["web"], "leaving focus with none changes nothing")
+}
+
+@Test func focusEndsWhenItsGroupGoes() {
+    var options = SidebarOptions()
+    options.focus("web", groups: groups)
+    options.keepFocus(among: groups)
+    #expect(options.focused == "web")
+    options.keepFocus(among: groups.filter { $0.id != "web" })
+    #expect(options.focused == nil && options.collapsed.isEmpty)
+}
+
+@Test func focusIsKeptWithTheRestOfTheView() throws {
+    let defaults = try #require(UserDefaults(suiteName: "acmd.tests.\(UUID().uuidString)"))
+    var options = SidebarOptions()
+    options.focus("api", groups: groups)
+    options.save(defaults)
+    #expect(SidebarOptions.load(defaults) == options)
+    // A view saved before focus was kept here still loads.
+    defaults.set(Data(#"{"mode":"groups","sort":"name","descending":false,"collapsed":["web"]}"#.utf8), forKey: SidebarOptions.key)
+    let old = SidebarOptions.load(defaults)
+    #expect(old.sort == .name && old.collapsed == ["web"] && old.focused == nil)
+}
+
+@Test func theCursorStopsOnHeadersAndSessions() throws {
+    let rows = SidebarLayout.rows(sessions: try [session("a", group: "web"), session("b")], groups: groups, sets: [], options: SidebarOptions())
+    #expect(SidebarLayout.cursorIDs(rows) == ["group:api", "group:web", "a", "group:default", "b"])
+    #expect(SidebarLayout.sessionIDs(rows) == ["a", "b"], "numbers count only sessions")
+    #expect(SidebarLayout.groupKey(cursor: SidebarLayout.headerID("web")) == "web" && SidebarLayout.groupKey(cursor: "a") == nil)
+}
+
+@Test func commandNStartsInTheSelectedGroupThenTheSessionsThenTheFocusedOne() throws {
+    let inWeb = try session("a", group: "web")
+    func group(_ selectedGroup: String?, _ selected: Session?, _ focused: String?) -> String? {
+        SidebarLayout.newSessionGroup(selectedGroup: selectedGroup, selected: selected, focused: focused, groups: groups)?.id
+    }
+    #expect(group("api", inWeb, "web") == "api")
+    #expect(group(nil, inWeb, "api") == "web")
+    #expect(group(nil, nil, "api") == "api")
+    #expect(group(nil, nil, nil) == nil, "nothing: this Mac's Default")
+    #expect(group("old", nil, nil) == nil, "an archived group isn't one to start in")
+    #expect(group(nil, try session("b"), "api") == "default", "a session in Default starts in Default")
+    let onStudio = SessionGroup(id: "g", name: "ops", host: "studio")
+    let found = SidebarLayout.newSessionGroup(selectedGroup: onStudio.key, selected: nil, focused: nil, groups: groups + [onStudio])
+    #expect(found == onStudio, "a host's group, for a session on that host")
+}
+
+@Test func theArchivedSectionShowsEachSessionUnderItsGroup() throws {
+    func archived(_ id: String, _ group: String) throws -> Session { try session(id, group: group, status: "archived") }
+    let empty = SessionGroup(id: "gone", name: "gone", archivedAt: "2026-11-02T00:00:00Z", order: 1)
+    let sections = SidebarLayout.archivedSections(
+        sessions: try [archived("c", "old"), archived("b", "default"), archived("a", "web"), archived("d", "nowhere")],
+        groups: groups + [empty])
+    // Live and archived groups, in their order, Default last; an archived group
+    // shows even with nothing in it, to bring it back. One whose group is gone is in Default.
+    #expect(sections.map(\.group.id) == ["gone", "old", "web", "default"])
+    #expect(sections.map { $0.sessions.map(\.id) } == [[], ["c"], ["a"], ["b", "d"]])
+    #expect(SidebarLayout.archivedSections(sessions: [], groups: groups).map(\.id) == ["old"])
+}
