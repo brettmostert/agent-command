@@ -135,9 +135,14 @@ nonisolated struct KnownHostForm: Equatable {
         client.removeHost(host.name) { [weak self] failure in self?.finish(failure) }
     }
 
-    func retry(_ host: RemoteHost) {
+    func connect(_ host: RemoteHost) {
         start(host.name)
-        client.retry(host.name) { [weak self] result in self?.finish(result.failure) }
+        client.connect(host.name) { [weak self] result in self?.finish(result.failure) }
+    }
+
+    func disconnect(_ host: RemoteHost) {
+        start(host.name)
+        client.disconnect(host.name) { [weak self] result in self?.finish(result.failure) }
     }
 
     func clearError() { error = nil }

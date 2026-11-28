@@ -49,7 +49,7 @@ func TestPairing(t *testing.T) {
 	if approved.Fingerprint != rh.OurFingerprint {
 		t.Errorf("approved = %+v", approved)
 	}
-	laptop.call(ipc.OpRemoteHostRetry, ipc.RemoteHostRef{Host: "studio"}, nil)
+	laptop.call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, nil)
 	connected := laptop.waitHost("studio", ipc.HostConnected)
 	if connected.HostVersion != binVersion {
 		t.Errorf("connected = %+v", connected)
@@ -61,7 +61,7 @@ func TestPairing(t *testing.T) {
 	req = request(desktop, rd.OurFingerprint)
 	host.call(ipc.OpRemoteDeny, ipc.RemoteRef{ID: req.ID}, nil)
 	// It asks again, and is only waiting again: never let in.
-	desktop.call(ipc.OpRemoteHostRetry, ipc.RemoteHostRef{Host: "studio"}, nil)
+	desktop.call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, nil)
 	if again := request(desktop, rd.OurFingerprint); again.ID == req.ID {
 		t.Errorf("the denied request is still there: %+v", again)
 	}

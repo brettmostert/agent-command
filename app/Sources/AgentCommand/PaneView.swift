@@ -17,6 +17,11 @@ final class PaneView: NSView {
     var onChange: ((PaneSets) -> Void)?
     /// Called to activate a stopped session shown in a pane.
     var onActivate: ((Session) -> Void)?
+    /// Whether a session's Remote host is one you disconnected: its pane
+    /// offers to connect it, rather than attaching.
+    var isDisconnected: (Session) -> Bool = { _ in false }
+    /// Called to connect a disconnected host, by its name.
+    var onConnect: ((String) -> Void)?
     /// Makes the line over a pane for a session; tapping it calls the closure.
     var makeHeader: ((String, @escaping () -> Void) -> NSView)?
 
@@ -84,6 +89,10 @@ final class PaneView: NSView {
         change { $0 = saved }
     }
 
+    /// Follows the Remote hosts' states: a pane on a disconnected host's
+    /// session attaches once it's connected.
+    func hostsChanged() { sync() }
+
     /// Follows the listed sessions: drops what's gone, and picks up status changes.
     func sessionsChanged(listed ids: Set<String>) {
         for (id, surface) in surfaces where !ids.contains(id) {
@@ -149,6 +158,11 @@ final class PaneView: NSView {
             slot.setMessage("Pick a session, or press ⌘N or ⌘T for a new one")
             return
         }
+        if surfaces[sessionID] == nil && isDisconnected(session) {
+            slot.setSurface(nil)
+            slot.setMessage("\(session.hostName) is disconnected. Click to connect it")
+            return
+        }
         if session.can(.resume) && surfaces[sessionID] == nil {
             slot.setSurface(nil)
             slot.setMessage("\(session.displayName) has stopped. Click to resume it")
@@ -159,8 +173,10 @@ final class PaneView: NSView {
 
     private func paneClicked(_ id: String) {
         change { $0.editCurrent { $0.focus(id) } }
-        if let sessionID = tree.focusedSession, surfaces[sessionID] == nil,
-           let session = session(sessionID), session.can(.resume) {
+        guard let sessionID = tree.focusedSession, surfaces[sessionID] == nil, let session = session(sessionID) else { return }
+        if isDisconnected(session) {
+            onConnect?(session.hostName)
+        } else if session.can(.resume) {
             onActivate?(session)
         }
     }

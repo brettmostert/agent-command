@@ -24,24 +24,25 @@ import (
 	"github.com/brettmostert/agent-command/internal/version"
 )
 
-// `acmd remote add|edit|remove|list|retry|browse|open|attach|drop`: this
+// `acmd remote add|edit|remove|list|connect|disconnect|browse|attach`: this
 // machine as a client of Remote hosts. The daemon keeps the connections; these
 // ask it over its socket, and attach to an added session's local socket.
 
 // Exit codes for a Remote host that can't be used, so scripts can tell why.
 // 1 is any other failure.
 const (
-	exitUnreachable  = 3 // no answer, or the connection dropped
-	exitPending      = 4 // waiting for the host's user to approve this machine
-	exitUnauthorized = 5 // the host refused this machine
-	exitFingerprint  = 6 // the host's fingerprint isn't the pinned one
-	exitVersion      = 7 // the two speak different protocol versions
-	exitPortTaken    = 8 // Hosting is on, but can't listen on its port
+	exitUnreachable  = 3  // no answer, or the connection dropped
+	exitPending      = 4  // waiting for the host's user to approve this machine
+	exitUnauthorized = 5  // the host refused this machine
+	exitFingerprint  = 6  // the host's fingerprint isn't the pinned one
+	exitVersion      = 7  // the two speak different protocol versions
+	exitPortTaken    = 8  // Hosting is on, but can't listen on its port
+	exitDisconnected = 15 // you disconnected the host: acmd remote connect connects it
 )
 
 func remoteClientCmds() []*cobra.Command {
 	return []*cobra.Command{newRemoteAddCmd(), newRemoteEditCmd(), newRemoteRemoveCmd(), newRemoteListCmd(),
-		newRemoteRetryCmd(), newRemoteBrowseCmd(), newRemoteAttachCmd()}
+		newRemoteConnectCmd(), newRemoteDisconnectCmd(), newRemoteBrowseCmd(), newRemoteAttachCmd()}
 }
 
 // hostExit is the exit code for a host in state, 0 when the state isn't a
@@ -59,6 +60,8 @@ func hostExit(state string) int {
 		return exitFingerprint
 	case ipc.HostVersion:
 		return exitVersion
+	case ipc.HostDisconnected:
+		return exitDisconnected
 	}
 	return 0
 }
@@ -82,6 +85,8 @@ func hostProblem(h ipc.RemoteHost) error {
 			"If its identity changed on purpose, run acmd remote edit %s --fingerprint %s", h.Name, h.Seen, h.Fingerprint, h.Name, h.Seen)
 	case ipc.HostVersion:
 		msg = fmt.Sprintf("%s speaks another protocol version: %s", h.Name, cmpOr(h.Error, "update acmd on both machines"))
+	case ipc.HostDisconnected:
+		msg = fmt.Sprintf("%s is disconnected: connect it with acmd remote connect %s", h.Name, h.Name)
 	default:
 		msg = fmt.Sprintf("%s (%s) can't be reached", h.Name, h.Address)
 		if h.Error != "" {
@@ -303,25 +308,28 @@ func hostNote(h ipc.RemoteHost) string {
 		return "waiting for approval — your fingerprint is " + h.OurFingerprint
 	case ipc.HostFingerprint:
 		return "fingerprint mismatch: it shows " + h.Seen
+	case ipc.HostDisconnected:
+		return "you disconnected it: acmd remote connect " + h.Name
 	}
 	return h.Error
 }
 
-// retryWait is how long acmd remote retry waits for the host to answer.
-var retryWait = 15 * time.Second
+// connectWait is how long acmd remote connect waits for the host to answer.
+var connectWait = 15 * time.Second
 
-func newRemoteRetryCmd() *cobra.Command {
+func newRemoteConnectCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "retry <name>",
-		Short: "Connect to a Remote host now, without waiting to retry, and say how it went",
-		Long: "Connects to a Remote host now, even one whose fingerprint didn't match, and waits until\n" +
-			"it's connected or refuses. It exits with the code for why it can't be used (see acmd remote --help).",
+		Use:   "connect <name>",
+		Short: "Connect to a Remote host now, and say how it went",
+		Long: "Connects to a Remote host now: one you disconnected, one waiting to try again, or one whose\n" +
+			"fingerprint didn't match. It waits until it's connected or refuses, and exits with the code\n" +
+			"for why it can't be used (see acmd remote --help).",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeHosts,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withDaemon(cmd, func(c *client) error {
 				var h ipc.RemoteHost
-				if err := c.conn.Call(ipc.OpRemoteHostRetry, ipc.RemoteHostRef{Host: args[0]}, &h); err != nil {
+				if err := c.conn.Call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: args[0]}, &h); err != nil {
 					return err
 				}
 				// Wait for this try: until the state moves on from what it was
@@ -329,12 +337,12 @@ func newRemoteRetryCmd() *cobra.Command {
 				// connecting, which changes Since), and isn't connecting.
 				first := h
 				settled := func() bool {
-					if h.State == ipc.HostConnecting || h.State == ipc.HostIdle {
+					if h.State == ipc.HostConnecting || h.State == ipc.HostIdle || h.State == ipc.HostDisconnected {
 						return false
 					}
 					return h.State == ipc.HostConnected || !h.Since.Equal(first.Since) || first.State == ipc.HostConnecting
 				}
-				for deadline := time.Now().Add(retryWait); !settled() && time.Now().Before(deadline); {
+				for deadline := time.Now().Add(connectWait); !settled() && time.Now().Before(deadline); {
 					time.Sleep(100 * time.Millisecond)
 					var ok bool
 					if h, ok = c.knownHost(args[0]); !ok {
@@ -352,6 +360,27 @@ func newRemoteRetryCmd() *cobra.Command {
 					return fmt.Errorf("%s: %s", h.Name, h.Error)
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s is %s.\n", h.Name, h.State)
+				return nil
+			})
+		},
+	}
+}
+
+func newRemoteDisconnectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "disconnect <name>",
+		Short: "Disconnect from a Remote host, and stop trying to connect, until acmd remote connect",
+		Long: "Closes the connection to a Remote host, and nothing dials it until you run acmd remote connect,\n" +
+			"across restarts too. Its sessions stay listed here, offline, and keep running on the host.",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeHosts,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withDaemon(cmd, func(c *client) error {
+				var h ipc.RemoteHost
+				if err := c.conn.Call(ipc.OpRemoteHostDisconnect, ipc.RemoteHostRef{Host: args[0]}, &h); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Disconnected from %s. Connect again with: acmd remote connect %s\n", h.Name, h.Name)
 				return nil
 			})
 		},

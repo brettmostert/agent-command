@@ -74,7 +74,7 @@ func finishOutput() error {
 	return nil
 }
 
-// Exit codes. 3 to 8 are a Remote host that can't be used.
+// Exit codes. 3 to 8, and 15, are a Remote host that can't be used.
 const (
 	exitFailed       = 1  // anything else
 	exitUsage        = 2  // the command line doesn't make sense
@@ -103,6 +103,7 @@ const exitCodesHelp = "Exit codes:\n" +
 	"  12  not running: the session's terminal has ended\n" +
 	"  13  partial: some of several sessions didn't change\n" +
 	"  14  conflict: it changed while acmd was saving it: run the command again\n" +
+	"  15  a Remote host is disconnected: acmd remote connect connects it\n" +
 	"With --json, an error is {\"error\": {\"code\": …, \"message\": …}} on stderr."
 
 // codedExits are the daemon's error codes and their exit codes.
@@ -119,6 +120,7 @@ var exitNames = map[int]string{
 	exitUnauthorized: "unauthorized", exitFingerprint: "fingerprint", exitVersion: "version", exitPortTaken: "port_taken",
 	exitNotFound: ipc.CodeNotFound, exitInvalid: ipc.CodeInvalid, exitNotSupported: ipc.CodeNotSupported,
 	exitNotRunning: ipc.CodeNotRunning, exitPartial: "partial", exitConflict: ipc.CodeConflict,
+	exitDisconnected: "disconnected",
 }
 
 // usageError is a command line that doesn't make sense.

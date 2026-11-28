@@ -66,8 +66,10 @@ private func connected(_ names: String...) -> [RemoteHost] { names.map { RemoteH
     #expect(fake.ops.last == "remote.hosts.edit" && fake.last as? [String: String] == ["host": "studio", "name": "studio2"])
     c.removeHost("studio") { results.append($0 == nil ? "ok" : "fail") }
     #expect(fake.ops.last == "remote.hosts.remove" && fake.last as? [String: String] == ["host": "studio"])
-    c.retry("studio") { note($0) }
-    #expect(fake.ops.last == "remote.hosts.retry" && fake.last as? [String: String] == ["host": "studio"])
+    c.connect("studio") { note($0) }
+    #expect(fake.ops.last == "remote.hosts.connect" && fake.last as? [String: String] == ["host": "studio"])
+    c.disconnect("studio") { note($0) }
+    #expect(fake.ops.last == "remote.hosts.disconnect" && fake.last as? [String: String] == ["host": "studio"])
     c.browse("studio") { note($0) }
     #expect(fake.ops.last == "remote.browse" && fake.last as? [String: String] == ["host": "studio"])
     c.newSession(host: "studio", dir: "~/src", harness: ("HW", "claude")) { note($0) }
@@ -84,7 +86,7 @@ private func connected(_ names: String...) -> [RemoteHost] { names.map { RemoteH
     #expect(fake.ops.last == "remote.folders.mkdir" && fake.last as? [String: String] == ["host": "studio", "path": "/w/new"])
     c.harnesses(host: "studio") { note($0) }
     #expect(fake.ops.last == "remote.harnesses" && fake.last as? [String: String] == ["host": "studio"])
-    #expect(results.allSatisfy { $0 == "ok" } && results.count == 12)
+    #expect(results.allSatisfy { $0 == "ok" } && results.count == 13)
 
     fake.failures["remote.browse"] = "there's no Remote host named \"x\""
     var message = ""
@@ -176,14 +178,16 @@ struct RemoteBrowserTests {
         #expect(RemoteBrowserModel.hint(Keymap()).contains("return open  n new session"))
     }
 
-    @Test func retryConnectsNow() {
+    @Test func connectAndDisconnect() {
         let fake = FakeCalls()
         let m = model(fake)
-        m.retry(RemoteHost(name: "studio", state: .unreachable))
-        #expect(fake.ops == ["remote.hosts.retry", "remote.browse"] && m.retrying.isEmpty)
-        fake.failures["remote.hosts.retry"] = "no such host"
-        m.retry(RemoteHost(name: "laptop"))
-        #expect(m.error == "no such host" && fake.ops.last == "remote.hosts.retry", "another host isn't listed again")
+        m.connect(RemoteHost(name: "studio", state: .unreachable))
+        #expect(fake.ops == ["remote.hosts.connect", "remote.browse"] && m.connecting.isEmpty)
+        m.disconnect(RemoteHost(name: "studio", state: .connected))
+        #expect(fake.ops.suffix(2) == ["remote.hosts.disconnect", "remote.browse"] && m.connecting.isEmpty)
+        fake.failures["remote.hosts.connect"] = "no such host"
+        m.connect(RemoteHost(name: "laptop"))
+        #expect(m.error == "no such host" && fake.ops.last == "remote.hosts.connect", "another host isn't listed again")
     }
 
     @Test func theKeysMoveOpenAndAct() throws {
@@ -208,7 +212,7 @@ struct RemoteBrowserTests {
         #expect(press("c") && copied == ["SHA256:me"])
         #expect(press("up") && m.host?.name == "studio")
         #expect(press("c") && copied.count == 1, "nothing to copy while connected")
-        #expect(press("r") && !fake.ops.contains("remote.hosts.retry"), "a connected host has nothing to retry")
+        #expect(press("r") && !fake.ops.contains("remote.hosts.connect"), "a connected host has nothing to connect")
         #expect(press("n") && started == ["studio"])
         #expect(press("right") && m.panel == .sessions && m.cursorSession?.id == "s1")
         #expect(press("down") && m.cursorSession?.id == "s2")
@@ -641,8 +645,10 @@ struct KnownHostsModelTests {
         fake.failures["remote.hosts.remove"] = "there's no Remote host named \"studio\""
         m.remove(host)
         #expect(fake.ops.last == "remote.hosts.remove" && m.error == "there's no Remote host named \"studio\"")
-        m.retry(host)
-        #expect(fake.ops.last == "remote.hosts.retry" && m.error == nil && m.busy == nil)
+        m.connect(host)
+        #expect(fake.ops.last == "remote.hosts.connect" && m.error == nil && m.busy == nil)
+        m.disconnect(host)
+        #expect(fake.ops.last == "remote.hosts.disconnect" && m.error == nil && m.busy == nil)
         fake.failures["remote.hosts.add"] = "a Remote host named \"studio\" is already known"
         m.add(ready()) { done.append($0) }
         #expect(done.last == false && m.error == "a Remote host named \"studio\" is already known")
@@ -650,7 +656,7 @@ struct KnownHostsModelTests {
         #expect(m.error == nil)
 
         fake.holding = true
-        m.retry(host)
+        m.connect(host)
         #expect(m.busy == "studio")
         m.add(ready())
         #expect(m.busy == "")

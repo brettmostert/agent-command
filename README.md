@@ -97,6 +97,7 @@ While attach and watch run, they count as this machine's terminal client, so `no
 | 12 | Not running: the session's terminal has ended |
 | 13 | Partial: some of several sessions didn't change |
 | 14 | Conflict: it changed while acmd was saving it; run the command again |
+| 15 | A Remote host is disconnected: `acmd remote connect` connects it |
 
 `acmd --help` lists them too.
 

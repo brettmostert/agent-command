@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/brettmostert/agent-command/internal/config"
 	"github.com/brettmostert/agent-command/internal/ipc"
@@ -29,6 +30,11 @@ type Data interface {
 	SaveKnownHost(replace string, h config.KnownHost) error
 	// RemoveKnownHost forgets a host, and says whether it was there.
 	RemoveKnownHost(name string) (bool, error)
+	// DisconnectedHosts are the names of the hosts you disconnected: added
+	// ones and config.toml's.
+	DisconnectedHosts() ([]string, error)
+	// SetHostDisconnected marks a host disconnected, or not.
+	SetHostDisconnected(name string, disconnected bool) error
 }
 
 // MemoryData is Data kept in memory, for tests and a Client with nowhere to
@@ -36,6 +42,8 @@ type Data interface {
 type MemoryData struct {
 	mu    sync.Mutex
 	Hosts []config.KnownHost
+	// Disconnected are the hosts you disconnected, by name.
+	Disconnected []string
 	// Fail, when set, fails every change, as a full disk would.
 	Fail error
 }
@@ -74,6 +82,25 @@ func (m *MemoryData) RemoveKnownHost(name string) (bool, error) {
 	n := len(m.Hosts)
 	m.Hosts = slices.DeleteFunc(m.Hosts, func(h config.KnownHost) bool { return h.Name == name })
 	return len(m.Hosts) != n, nil
+}
+
+func (m *MemoryData) DisconnectedHosts() ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.Disconnected), nil
+}
+
+func (m *MemoryData) SetHostDisconnected(name string, disconnected bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Fail != nil {
+		return m.Fail
+	}
+	m.Disconnected = slices.DeleteFunc(m.Disconnected, func(n string) bool { return n == name })
+	if disconnected {
+		m.Disconnected = append(m.Disconnected, name)
+	}
+	return nil
 }
 
 // ErrInConfig is a change to a host that config.toml lists: it's changed by
@@ -162,6 +189,9 @@ func (c *Client) EditHost(_ context.Context, e ipc.RemoteHostEdit) (ipc.RemoteHo
 		return ipc.RemoteHost{}, err
 	}
 	if kh.Name != e.Host {
+		if err := c.moveDisconnected(e.Host, kh.Name); err != nil {
+			return ipc.RemoteHost{}, err
+		}
 		c.mu.Lock()
 		for _, a := range c.added {
 			if a.Host == e.Host {
@@ -194,6 +224,9 @@ func (c *Client) RemoveHost(_ context.Context, name string) error {
 	if !ok {
 		return fmt.Errorf("there's no Remote host named %q", name)
 	}
+	if err := c.o.Data.SetHostDisconnected(name, false); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	for _, a := range c.sortedAddedLocked(name) {
 		c.closeProxyLocked(a)
@@ -201,6 +234,59 @@ func (c *Client) RemoveHost(_ context.Context, name string) error {
 	}
 	c.mu.Unlock()
 	return c.reloadLocked()
+}
+
+// moveDisconnected keeps a renamed host disconnected, when it was.
+func (c *Client) moveDisconnected(from, to string) error {
+	names, err := c.o.Data.DisconnectedHosts()
+	if err != nil || !slices.Contains(names, from) {
+		return err
+	}
+	if err := c.o.Data.SetHostDisconnected(to, true); err != nil {
+		return err
+	}
+	return c.o.Data.SetHostDisconnected(from, false)
+}
+
+// Disconnect closes a host's connection, and nothing dials it until it's
+// connected again, across restarts too. Its added sessions stay, offline.
+func (c *Client) Disconnect(name string) (ipc.RemoteHost, error) {
+	return c.setDisconnected(name, true)
+}
+
+// Connect connects to a host now, without waiting out the backoff: one you
+// disconnected, or one whose fingerprint didn't match, is tried again too.
+func (c *Client) Connect(name string) (ipc.RemoteHost, error) {
+	return c.setDisconnected(name, false)
+}
+
+func (c *Client) setDisconnected(name string, disconnected bool) (ipc.RemoteHost, error) {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	if _, err := c.Host(name); err != nil {
+		return ipc.RemoteHost{}, err
+	}
+	if err := c.o.Data.SetHostDisconnected(name, disconnected); err != nil {
+		return ipc.RemoteHost{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	h, err := c.hostLocked(name)
+	if err != nil {
+		return ipc.RemoteHost{}, err
+	}
+	h.disconnected = disconnected
+	if disconnected {
+		h.setLocked(ipc.HostDisconnected, "", time.Time{})
+		h.wake()
+	} else {
+		h.blocked = false
+		if h.state == ipc.HostDisconnected {
+			h.setLocked(ipc.HostConnecting, "", time.Time{})
+		}
+		h.leaseLocked()
+	}
+	return h.statusLocked(), nil
 }
 
 // checkHost checks a host entry against the others (all but the one named

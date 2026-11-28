@@ -110,6 +110,8 @@ final class SessionStore {
     @ObservationIgnored var onSelect: ((Session?) -> Void)?
     /// Called with the ids of the listed sessions when they change.
     @ObservationIgnored var onListChanged: ((Set<String>) -> Void)?
+    /// Called when a Remote host's state changes.
+    @ObservationIgnored var onHostsChanged: (() -> Void)?
     /// Called with items new since the app started.
     @ObservationIgnored var onNewItems: (([InboxItem]) -> Void)?
     /// Whether the main window is open: closing it leaves the app running in the background.
@@ -189,6 +191,11 @@ final class SessionStore {
     /// connections attached to it, for one shared from this Mac.
     func place(of session: Session, clients: [String: Int] = [:]) -> SessionPlace {
         SessionPlace(session, hosts: remoteHosts, clients: clients[session.id] ?? 0)
+    }
+
+    /// Whether a session is on a Remote host you disconnected.
+    func isDisconnected(_ session: Session) -> Bool {
+        session.isOnHost && remoteHosts.first { $0.name == session.hostName }?.isDisconnected == true
     }
 
     /// The sidebar takes or gives up the keyboard. Marks only last while it has it.
@@ -572,7 +579,10 @@ final class SessionStore {
             if snapshot.remote != self.remote { self.remote = snapshot.remote }
             self.onRemote?(snapshot.remote)
             let hosts = snapshot.remoteHosts ?? []
-            if hosts != self.remoteHosts { self.remoteHosts = hosts }
+            if hosts != self.remoteHosts {
+                self.remoteHosts = hosts
+                self.onHostsChanged?()
+            }
             if let settings = snapshot.settings, settings != HostSettings.shared.values { HostSettings.shared.values = settings }
             if let harnesses = snapshot.harnesses { HarnessList.shared.set(harnesses) }
             let health = snapshot.health ?? []

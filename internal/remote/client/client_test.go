@@ -135,8 +135,8 @@ func TestKnownHosts(t *testing.T) {
 	if _, err := l.c.Host("tunnel"); err == nil {
 		t.Error("still known")
 	}
-	if _, err := l.c.Retry("tunnel"); err == nil {
-		t.Error("retried a host that isn't known")
+	if _, err := l.c.Connect("tunnel"); err == nil {
+		t.Error("connected a host that isn't known")
 	}
 }
 
@@ -285,8 +285,8 @@ func TestFingerprintMismatchIsAHardStop(t *testing.T) {
 	if got := l.dials.count(); got != n {
 		t.Errorf("dialed %d more times", got-n)
 	}
-	// Retry tries once more, and stops again.
-	_, err = l.c.Retry("studio")
+	// Connect tries once more, and stops again.
+	_, err = l.c.Connect("studio")
 	must(t, err)
 	eventually(t, "the retry", func() bool { return l.dials.count() == n+1 && l.state("studio").State == ipc.HostFingerprint })
 	// The right fingerprint gets in.

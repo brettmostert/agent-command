@@ -4,10 +4,10 @@
 // that relays to the host. The apps and the CLI attach to that socket as to a
 // local session's, and never touch the network themselves.
 //
-// A host is connected while it has added sessions, or while something uses
-// it (browsing, the Where picker), and for IdleAfter after. A connection that
-// drops is retried with a backoff and jitter; a host whose fingerprint isn't
-// the pinned one is never retried until its entry changes.
+// A host is connected while it's known, unless you disconnected it: then
+// nothing dials it until you connect it again. A connection that drops is
+// retried with a backoff and jitter; a host whose fingerprint isn't the
+// pinned one is never retried until its entry changes.
 //
 // The daemon keeps the added sessions (Backend): this package tells it what
 // the hosts say about them. Their inbox items are kept here, in memory: the
@@ -243,6 +243,15 @@ func (c *Client) reloadLocked() error {
 		c.o.Log.Printf("remote hosts: %v (they stay as they were)", err)
 		return err
 	}
+	names, err := c.o.Data.DisconnectedHosts()
+	if err != nil {
+		c.o.Log.Printf("remote hosts: %v (they stay as they were)", err)
+		return err
+	}
+	disconnected := map[string]bool{}
+	for _, n := range names {
+		disconnected[n] = true
+	}
 	inConfig := map[string]bool{}
 	for _, h := range r.Hosts {
 		inConfig[h.Name] = true
@@ -255,12 +264,13 @@ func (c *Client) reloadLocked() error {
 	c.mu.Lock()
 	c.inConfig = inConfig
 	c.mu.Unlock()
-	c.apply(r)
+	c.apply(r, disconnected)
 	return nil
 }
 
-// apply follows r: hosts come and go, and an edited host reconnects.
-func (c *Client) apply(r config.Remote) {
+// apply follows r: hosts come and go, an edited host reconnects, and the
+// disconnected ones aren't dialed.
+func (c *Client) apply(r config.Remote, disconnected map[string]bool) {
 	key := [2]string{r.Client.Cert, r.Client.Key}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -288,10 +298,17 @@ func (c *Client) apply(r config.Remote) {
 		h, ok := c.hosts[kh.Name]
 		if !ok {
 			h = newHostConn(c, kh)
+			if disconnected[kh.Name] {
+				h.disconnected, h.state = true, ipc.HostDisconnected
+			}
 			c.hosts[kh.Name] = h
 			c.wg.Add(1)
 			go h.run()
 			continue
+		}
+		if h.disconnected != disconnected[kh.Name] {
+			h.disconnected = disconnected[kh.Name]
+			h.wake()
 		}
 		if h.cfg != kh || newID {
 			h.cfg = kh
@@ -363,20 +380,6 @@ func (c *Client) hostLocked(name string) (*hostConn, error) {
 	return h, nil
 }
 
-// Retry connects to a host now, without waiting out the backoff. A host
-// whose fingerprint didn't match is tried again too.
-func (c *Client) Retry(name string) (ipc.RemoteHost, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	h, err := c.hostLocked(name)
-	if err != nil {
-		return ipc.RemoteHost{}, err
-	}
-	h.blocked = false
-	h.leaseLocked()
-	return h.statusLocked(), nil
-}
-
 // connect is a host's connection, once it's connected: it asks for one, and
 // waits until it's there, the host refuses, or ctx ends.
 func (c *Client) connect(ctx context.Context, name string) (*wire.Conn, error) {
@@ -394,7 +397,7 @@ func (c *Client) connect(ctx context.Context, name string) (*wire.Conn, error) {
 			conn := h.conn
 			c.mu.Unlock()
 			return conn, nil
-		case h.blocked, h.tries > tries && failed(h.state), h.stopped:
+		case h.disconnected, h.blocked, h.tries > tries && failed(h.state), h.stopped:
 			err := h.errorLocked()
 			c.mu.Unlock()
 			return nil, err

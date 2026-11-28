@@ -56,7 +56,7 @@ func TestDismissedWarningsMoveToTheRegistry(t *testing.T) {
 	for _, q := range []string{
 		`ALTER TABLE clients DROP COLUMN profile`, `ALTER TABLE clients DROP COLUMN dismissed`, `ALTER TABLE clients DROP COLUMN keymap`, `ALTER TABLE events DROP COLUMN caller`, `ALTER TABLE remote_clients DROP COLUMN scope`, `DROP TABLE requests`,
 		`INSERT INTO app_state (key, value) VALUES ('health.dismissed:mac-1', '["hooks"]'), ('health.dismissed:old', '')`,
-		`DROP TABLE harnesses`, `ALTER TABLE sessions DROP COLUMN harness_id`, `ALTER TABLE sessions RENAME COLUMN harness_kind TO harness`, `ALTER TABLE sessions ADD COLUMN bg_id TEXT NOT NULL DEFAULT ''`, `ALTER TABLE sessions ADD COLUMN external TEXT NOT NULL DEFAULT ''`, `ALTER TABLE groups DROP COLUMN parent_id`, `ALTER TABLE groups DROP COLUMN path`, `ALTER TABLE groups ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE groups ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE view_state (id INTEGER PRIMARY KEY, state TEXT NOT NULL)`, `PRAGMA user_version = 14`,
+		`DROP TABLE harnesses`, `ALTER TABLE sessions DROP COLUMN harness_id`, `ALTER TABLE sessions RENAME COLUMN harness_kind TO harness`, `ALTER TABLE sessions ADD COLUMN bg_id TEXT NOT NULL DEFAULT ''`, `ALTER TABLE sessions ADD COLUMN external TEXT NOT NULL DEFAULT ''`, `ALTER TABLE groups DROP COLUMN parent_id`, `ALTER TABLE groups DROP COLUMN path`, `ALTER TABLE groups ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE groups ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE view_state (id INTEGER PRIMARY KEY, state TEXT NOT NULL)`, `DROP TABLE remote_hosts_disconnected`, `PRAGMA user_version = 14`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)

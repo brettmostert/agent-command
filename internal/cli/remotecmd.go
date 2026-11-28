@@ -37,7 +37,7 @@ func newRemoteCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 	}
 	cmd.AddCommand(newRemoteIdentityCmd(), newRemoteHostingCmd(), newRemoteStatusCmd(), newRemoteClientsCmd(),
-		newRemoteAuthorizeCmd(), newRemoteRevokeCmd(), newRemoteDisconnectCmd(), newRemoteRequestsCmd(),
+		newRemoteAuthorizeCmd(), newRemoteRevokeCmd(), newRemoteDropCmd(), newRemoteRequestsCmd(),
 		newRemoteRenameCmd(), newRemoteScopeCmd(), newRemoteCertCmd())
 	cmd.AddCommand(remoteSessionCmds()...)
 	cmd.AddCommand(remoteClientCmds()...)
