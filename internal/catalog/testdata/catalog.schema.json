@@ -1038,6 +1038,38 @@
       }
     },
     {
+      "name": "remote.hosts.connect",
+      "description": "Connects to a known host now, without waiting out the backoff: one you disconnected too.",
+      "scope": "act",
+      "kind": "change",
+      "grant": "host",
+      "transport": {
+        "op": "remote.hosts.connect"
+      },
+      "input": {
+        "$ref": "#/$defs/ipc.RemoteHostRef"
+      },
+      "output": {
+        "$ref": "#/$defs/ipc.RemoteHost"
+      }
+    },
+    {
+      "name": "remote.hosts.disconnect",
+      "description": "Closes a known host's connection, and nothing dials it until it's connected again. Its sessions stay, offline.",
+      "scope": "act",
+      "kind": "change",
+      "grant": "host",
+      "transport": {
+        "op": "remote.hosts.disconnect"
+      },
+      "input": {
+        "$ref": "#/$defs/ipc.RemoteHostRef"
+      },
+      "output": {
+        "$ref": "#/$defs/ipc.RemoteHost"
+      }
+    },
+    {
       "name": "remote.hosts.edit",
       "description": "Changes a known host.",
       "scope": "admin",
@@ -1064,22 +1096,6 @@
       },
       "input": {
         "$ref": "#/$defs/ipc.RemoteHostRef"
-      }
-    },
-    {
-      "name": "remote.hosts.retry",
-      "description": "Connects to a known host now, without waiting out the backoff.",
-      "scope": "act",
-      "kind": "change",
-      "grant": "host",
-      "transport": {
-        "op": "remote.hosts.retry"
-      },
-      "input": {
-        "$ref": "#/$defs/ipc.RemoteHostRef"
-      },
-      "output": {
-        "$ref": "#/$defs/ipc.RemoteHost"
       }
     },
     {

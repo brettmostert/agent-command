@@ -106,10 +106,16 @@ struct RemoteBrowserView: View {
                 Text(host.name).fontWeight(.bold).foregroundStyle(theme.magenta)
                 Text(host.stateTitle).foregroundStyle(host.isConnected ? theme.green : host.isFailing ? theme.red : theme.dim)
                 Spacer()
-                Button("Retry") { model.retry(host) }
+                Button("Connect") { model.connect(host) }
                     .buttonStyle(.borderless)
-                    .disabled(!host.canRetry || model.retrying.contains(host.name))
+                    .disabled(!host.canConnect || model.connecting.contains(host.name))
                     .help("Connect now, without waiting (r)")
+                if !host.isDisconnected {
+                    Button("Disconnect") { model.disconnect(host) }
+                        .buttonStyle(.borderless)
+                        .disabled(model.connecting.contains(host.name))
+                        .help("Stop connecting to it, until you connect it again")
+                }
                 Button("New Session on \(host.name)…") { model.newSession(host.name) }
                     .buttonStyle(.borderless)
                     .help("⇧⌘N with this host chosen (n)")

@@ -13,7 +13,13 @@ const (
 	OpRemoteHostAdd    = "remote.hosts.add"    // adds a known host to config.toml (RemoteHostEdit) → RemoteHost
 	OpRemoteHostEdit   = "remote.hosts.edit"   // changes one (RemoteHostEdit: Host names it) → RemoteHost
 	OpRemoteHostRemove = "remote.hosts.remove" // forgets one; its sessions go from here (RemoteHostRef.Host)
-	OpRemoteHostRetry  = "remote.hosts.retry"  // connects now, without waiting out the backoff (RemoteHostRef.Host) → RemoteHost
+	// OpRemoteHostConnect connects to one now, without waiting out the
+	// backoff: one you disconnected too (RemoteHostRef.Host → RemoteHost).
+	OpRemoteHostConnect = "remote.hosts.connect"
+	// OpRemoteHostDisconnect closes one's connection, and nothing dials it
+	// until it's connected again. Its sessions stay here, offline
+	// (RemoteHostRef.Host → RemoteHost).
+	OpRemoteHostDisconnect = "remote.hosts.disconnect"
 	// OpRemoteBrowse connects to a host and lists its own sessions, as it has
 	// them now (RemoteHostRef.Host → RemoteBrowse).
 	OpRemoteBrowse = "remote.browse"
@@ -41,7 +47,8 @@ type RemoteCall struct {
 
 // Remote host states (RemoteHost.State).
 const (
-	HostIdle         = "idle"         // nothing needs it: no added sessions, and nobody is browsing it
+	HostIdle         = "idle"         // not tried yet
+	HostDisconnected = "disconnected" // you disconnected it: nothing dials it until you connect it
 	HostConnecting   = "connecting"   // dialing, or the TLS handshake and hello
 	HostConnected    = "connected"    // in use
 	HostUnreachable  = "unreachable"  // no answer, or the connection dropped: retrying

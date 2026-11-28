@@ -233,6 +233,14 @@ func (k knownHostData) RemoveKnownHost(name string) (bool, error) {
 	return k.d.store.RemoveKnownHost(context.Background(), name)
 }
 
+func (k knownHostData) DisconnectedHosts() ([]string, error) {
+	return k.d.store.DisconnectedHosts(context.Background())
+}
+
+func (k knownHostData) SetHostDisconnected(name string, disconnected bool) error {
+	return k.d.store.SetHostDisconnected(context.Background(), name, disconnected)
+}
+
 // movedKey records that config.toml's Remote data was moved to state.db.
 const movedKey = "config.remote_moved"
 

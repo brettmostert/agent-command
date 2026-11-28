@@ -97,3 +97,32 @@ func (s *Store) RemoveKnownHost(ctx context.Context, name string) (bool, error) 
 	n, _ := res.RowsAffected()
 	return n > 0, nil
 }
+
+// DisconnectedHosts lists the names of the hosts you disconnected.
+func (s *Store) DisconnectedHosts(ctx context.Context) ([]string, error) {
+	rows, err := s.q.QueryContext(ctx, `SELECT name FROM remote_hosts_disconnected ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+// SetHostDisconnected marks the host of that name disconnected, or not.
+func (s *Store) SetHostDisconnected(ctx context.Context, name string, disconnected bool) error {
+	if !disconnected {
+		_, err := s.q.ExecContext(ctx, `DELETE FROM remote_hosts_disconnected WHERE name = ?`, name)
+		return err
+	}
+	_, err := s.q.ExecContext(ctx, `INSERT INTO remote_hosts_disconnected (name, disconnected_at) VALUES (?, ?)
+		ON CONFLICT (name) DO NOTHING`, name, ms(s.now().UTC()))
+	return err
+}

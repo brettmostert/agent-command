@@ -169,7 +169,8 @@ struct RemoteSettings: View {
                         .font(.caption)
                     Menu {
                         Button("Browse Sessions…") { browseHosts(host.name) }
-                        Button("Retry") { knownHosts.retry(host) }.disabled(!host.canRetry)
+                        Button("Connect") { knownHosts.connect(host) }.disabled(!host.canConnect)
+                        Button("Disconnect") { knownHosts.disconnect(host) }.disabled(host.isDisconnected)
                         Button("Edit…") { editingHost = host }.disabled(host.inConfig)
                         Divider()
                         Button("Remove…", role: .destructive) { removingHost = host }.disabled(host.inConfig)
@@ -242,7 +243,7 @@ struct RemoteSettings: View {
                             ForEach(RemoteClient.scopes, id: \.scope) { Text($0.label).tag($0.scope) }
                         }
                         .disabled(client.inConfig)
-                        Button("Disconnect") { remote.disconnect(client) }.disabled(!client.isConnected)
+                        Button("Drop Connections") { remote.disconnect(client) }.disabled(!client.isConnected)
                         Divider()
                         Button("Revoke…", role: .destructive) { revoking = client }.disabled(client.inConfig)
                         if client.inConfig { Text("Set in config.toml: edit the file to change it") }

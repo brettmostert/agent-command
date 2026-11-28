@@ -98,7 +98,7 @@ Once the host approves the client, its sessions show on the client: there's noth
 
 On the client:
 
-- **App:** nothing to do: once a host is known and connected, its sessions show in the sidebar, after this Mac's, **arranged as the host has them**: its groups (named "API · studio"), its sets, and its Default (named after the host). **Remote hosts…** in the command palette lists a host's sessions to open one, and starts new ones there (n). The browser's keys: ↑ ↓ move, ← → go between hosts and sessions, return shows a session, r retries a host now, n starts a new session on it, and c copies your fingerprint.
+- **App:** nothing to do: once a host is known and connected, its sessions show in the sidebar, after this Mac's, **arranged as the host has them**: its groups (named "API · studio"), its sets, and its Default (named after the host). **Remote hosts…** in the command palette lists a host's sessions to open one, and starts new ones there (n). The browser's keys: ↑ ↓ move, ← → go between hosts and sessions, return shows a session, r connects a host now, n starts a new session on it, and c copies your fingerprint.
 - **CLI:**
 
   ```sh
@@ -108,7 +108,9 @@ On the client:
 
 **Notifications** follow you: a host shows each notification on the machine you're using, as `notify.route` says (`one`, the default, or `all`). Each paired machine counts as one client there, active while you use any of its apps, and passes the notification on to its app you're using. A change you make from a machine is recorded on the host with the app that made it.
 
-A host's sessions show with "↗ studio". While the host can't be reached, their rows are greyed and reconnect by themselves. A change you make to one (renaming, archiving, moving it between the host's groups) is made on the host, so every client of the host sees the same tree. A host's sessions stay in its own groups and sets: they can't be moved into this Mac's.
+A host's sessions show with "↗ studio". While the host can't be reached, their rows are greyed and reconnect by themselves.
+
+**Disconnecting a host.** To stop using a host for a while without removing it: Settings → Remote → Known hosts → its menu → **Disconnect**, or `acmd remote disconnect studio`. The connection closes, and nothing tries to connect until you choose **Connect** there, or run `acmd remote connect studio`. It stays disconnected across restarts. Its sessions stay in the sidebar, greyed with "disconnected", and keep running on the host. Opening one offers **Connect**. Anything else that needs the host is refused with `studio is disconnected: connect it first` (exit 15). The host's tree is kept in memory only: after this Mac's daemon restarts, a disconnected host's sessions show again once you connect it. A change you make to one (renaming, archiving, moving it between the host's groups) is made on the host, so every client of the host sees the same tree. A host's sessions stay in its own groups and sets: they can't be moved into this Mac's.
 
 Once a known host exists, the sidebar has a filter next to "Sessions": All, Local (the sessions that run on this Mac, Remote ones included), Remote (every host's sessions), or one host's sessions.
 
@@ -323,7 +325,7 @@ So authorizing a client is like giving it your account on the host. Only authori
 
 **Why localhost is the default.** Hosting is off until you turn it on, and then it listens on `127.0.0.1` only, so nothing on the network can reach it until you choose **All interfaces** or set up a tunnel. Even when it's reachable, a client must show a cert whose fingerprint you authorized; anyone else only leaves a request.
 
-**Revoking a client.** Settings → Remote → Authorized clients → **Revoke…**, or `acmd remote revoke <name|fingerprint>`. Its connections are dropped at once, and it can't get back in. If it tries again, it leaves a new request, which you can deny. **Disconnect** (`acmd remote disconnect`) only drops its connections: it stays authorized and can reconnect.
+**Revoking a client.** Settings → Remote → Authorized clients → **Revoke…**, or `acmd remote revoke <name|fingerprint>`. Its connections are dropped at once, and it can't get back in. If it tries again, it leaves a new request, which you can deny. **Drop Connections** (`acmd remote drop <name|fingerprint>`) only drops its connections: it stays authorized and can reconnect.
 
 **Regenerating the identity.** If a Mac's key may have leaked, make a new identity: Settings → Remote → Identity → **Regenerate…**, or `acmd remote identity --regenerate`. Every host and client that trusts this Mac must then trust its new fingerprint. A cert of your own isn't changed by this: replace it with `acmd remote cert`.
 
@@ -362,7 +364,7 @@ On the host:
 | `clients [--json]` | The authorized clients, and who's connected. |
 | `rename <name\|fingerprint> <new-name>` | Renames an authorized client. It stays connected. |
 | `revoke <name\|fingerprint>` | Stops a client connecting, and drops it now. |
-| `disconnect <name\|fingerprint\|connection>` | Drops a client's connections. It stays authorized. |
+| `drop <name\|fingerprint\|connection>` | Drops a client's connections. It stays authorized. |
 | `acmd new --remote` / `--no-remote` | Starts a session as Remote or local. Without either, `new_sessions_remote` decides. |
 
 On the client:
@@ -373,7 +375,8 @@ On the client:
 | `edit <name> [--name N] [--address host:port] [--fingerprint …\|--cert file]` | Changes a known host. Its sessions here are named by its new name. |
 | `remove <name> [-y]` | Forgets a host: its sessions go from here. They keep running on the host. |
 | `list [--json]` | The known hosts, each one's state, and how many of its sessions are here. |
-| `retry <name>` | Connects now, waits up to 15 seconds, and exits with the code for how it went. |
+| `connect <name>` | Connects now (a disconnected host too), waits up to 15 seconds, and exits with the code for how it went. |
+| `disconnect <name>` | Closes the connection, and nothing connects it until `connect`, across restarts too. Its sessions stay here. |
 | `browse <host> [--json]` | The host's sessions, numbered, the most recently active first. |
 | `attach <host> <#\|id\|name>` (or `open`) | Attaches this terminal to one of them. Ctrl+] detaches. |
 | `acmd new --on <host> [--dir D] [--harness H] [--name N] [--prompt P] [--group G]` | Starts a session on the host (in its home, without `--dir`): it shows here in the host's tree. |
@@ -401,13 +404,14 @@ On the wire, `session.list` takes `{"filter": {"on": ["studio"], "resumable": tr
 | 6 | Fingerprint mismatch: the host isn't showing the fingerprint you pinned. |
 | 7 | Version mismatch: the two acmds speak different protocol versions. |
 | 8 | Port taken: Hosting is on, but can't listen on its port (`acmd remote hosting on`). |
+| 15 | Disconnected: you disconnected the host (`acmd remote connect <host>`). |
 | 1 | Any other failure. |
 
 ## Troubleshooting
 
 `acmd remote list` on a client, and `acmd remote status` on a host, show where things stand. `acmd doctor` checks the identities, warns about Remote sessions while Hosting is off, and about hosts that need someone to act.
 
-**Fingerprint mismatch** (exit 6). The host showed a different fingerprint from the one you pinned, and the client won't connect, or retry, until you act. If you know why it changed (the host regenerated its identity, or switched to its own cert), check the new fingerprint with the host's `acmd remote identity`, then pin it:
+**Fingerprint mismatch** (exit 6). The host showed a different fingerprint from the one you pinned, and the client won't connect, or try again, until you act. If you know why it changed (the host regenerated its identity, or switched to its own cert), check the new fingerprint with the host's `acmd remote identity`, then pin it:
 
 ```sh
 acmd remote edit studio --fingerprint SHA256:…
@@ -423,7 +427,7 @@ If you don't know why, don't connect: something else may be answering at that ad
 
 **A session is Remote, but Hosting is off.** No client can reach it. The app's status bar warns about it, with **Turn On Hosting**, and so does `acmd doctor`. Turn Hosting on, or make the session local with `acmd remote off <session>`.
 
-**The host is unreachable** (exit 3). The client keeps trying, waiting longer each time up to 30 seconds; `acmd remote retry <host>` tries now. Check that:
+**The host is unreachable** (exit 3). The client keeps trying, waiting longer each time up to 30 seconds; `acmd remote connect <host>` tries now. Check that:
 
 - the host is awake, and its daemon is running (`acmd remote status` there),
 - Hosting is on, and listening on **All interfaces** for a client on another machine,

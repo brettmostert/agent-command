@@ -202,7 +202,7 @@ func TestHostProblemsAndExitCodes(t *testing.T) {
 func TestRemoteHelpListsExitCodes(t *testing.T) {
 	out := mustRun(t, "remote", "--help")
 	for _, want := range []string{"Remote hosts", "acmd remote add", "4   a Remote host is waiting", "6   a Remote host's fingerprint",
-		"add", "browse", "open", "attach", "drop", "retry"} {
+		"add", "browse", "open", "attach", "drop", "connect", "disconnect", "15  a Remote host is disconnected"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q:\n%s", want, out)
 		}
@@ -323,13 +323,13 @@ func TestRemoteList(t *testing.T) {
 	}
 }
 
-func TestRemoteRetry(t *testing.T) {
+func TestRemoteConnect(t *testing.T) {
 	f := newFakeDaemon(t)
-	orig := retryWait
-	retryWait = 2 * time.Second
-	t.Cleanup(func() { retryWait = orig })
+	orig := connectWait
+	connectWait = 2 * time.Second
+	t.Cleanup(func() { connectWait = orig })
 
-	f.reply(ipc.OpRemoteHostRetry, ipc.RemoteHost{Name: "studio", State: ipc.HostConnecting})
+	f.reply(ipc.OpRemoteHostConnect, ipc.RemoteHost{Name: "studio", State: ipc.HostConnecting})
 	var mu sync.Mutex
 	n := 0
 	f.handle(ipc.OpRemoteHosts, func(json.RawMessage) (any, error) {
@@ -341,43 +341,71 @@ func TestRemoteRetry(t *testing.T) {
 		}
 		return []ipc.RemoteHost{{Name: "studio", State: ipc.HostConnected, HostVersion: "1.0"}}, nil
 	})
-	if out := mustRun(t, "remote", "retry", "studio"); !strings.Contains(out, "Connected to studio (studio, acmd 1.0).") {
+	if out := mustRun(t, "remote", "connect", "studio"); !strings.Contains(out, "Connected to studio (studio, acmd 1.0).") {
 		t.Errorf("retry:\n%s", out)
 	}
 	// A failure before the retry, and the same one after this try (Since moved).
 	before, after := time.Unix(1000, 0), time.Unix(2000, 0)
 	for state, code := range map[string]int{ipc.HostPending: 4, ipc.HostUnauthorized: 5, ipc.HostFingerprint: 6, ipc.HostVersion: 7,
-		ipc.HostUnreachable: 3, ipc.HostError: 1} {
-		f.reply(ipc.OpRemoteHostRetry, ipc.RemoteHost{Name: "studio", State: state, Since: before})
+		ipc.HostUnreachable: 3, ipc.HostDisconnected: 15, ipc.HostError: 1} {
+		f.reply(ipc.OpRemoteHostConnect, ipc.RemoteHost{Name: "studio", State: state, Since: before})
 		f.reply(ipc.OpRemoteHosts, []ipc.RemoteHost{{Name: "studio", State: state, Since: after, Error: "the host's cert: missing"}})
-		if _, err := acmd(t, "remote", "retry", "studio"); ExitCode(err) != code {
+		if _, err := acmd(t, "remote", "connect", "studio"); ExitCode(err) != code {
 			t.Errorf("retry %s: %v (code %d), want %d", state, err, ExitCode(err), code)
 		}
 	}
-	f.reply(ipc.OpRemoteHostRetry, ipc.RemoteHost{Name: "studio", State: ipc.HostError, Since: before})
+	f.reply(ipc.OpRemoteHostConnect, ipc.RemoteHost{Name: "studio", State: ipc.HostError, Since: before})
 	f.reply(ipc.OpRemoteHosts, []ipc.RemoteHost{{Name: "studio", State: ipc.HostError, Since: after, Error: "the host's cert: missing"}})
-	_, err := acmd(t, "remote", "retry", "studio")
+	_, err := acmd(t, "remote", "connect", "studio")
 	errContains(t, err, "studio: the host's cert: missing")
 	// A failure that never tries again in the wait: it's what it was.
-	retryWait = 150 * time.Millisecond
-	f.reply(ipc.OpRemoteHostRetry, ipc.RemoteHost{Name: "studio", State: ipc.HostPending, Since: before})
+	connectWait = 150 * time.Millisecond
+	f.reply(ipc.OpRemoteHostConnect, ipc.RemoteHost{Name: "studio", State: ipc.HostPending, Since: before})
 	f.reply(ipc.OpRemoteHosts, []ipc.RemoteHost{{Name: "studio", State: ipc.HostPending, Since: before}})
-	if _, err := acmd(t, "remote", "retry", "studio"); ExitCode(err) != 4 {
+	if _, err := acmd(t, "remote", "connect", "studio"); ExitCode(err) != 4 {
 		t.Errorf("retry with no new try: %v", err)
 	}
 	// Still connecting when the wait is over.
-	retryWait = 150 * time.Millisecond
-	f.reply(ipc.OpRemoteHostRetry, ipc.RemoteHost{Name: "studio", State: ipc.HostConnecting})
+	connectWait = 150 * time.Millisecond
+	f.reply(ipc.OpRemoteHostConnect, ipc.RemoteHost{Name: "studio", State: ipc.HostConnecting})
 	f.reply(ipc.OpRemoteHosts, []ipc.RemoteHost{{Name: "studio", State: ipc.HostConnecting}})
-	if _, err := acmd(t, "remote", "retry", "studio"); ExitCode(err) != 3 {
+	if _, err := acmd(t, "remote", "connect", "studio"); ExitCode(err) != 3 {
 		t.Errorf("retry still connecting: %v", err)
 	}
 	f.reply(ipc.OpRemoteHosts, []ipc.RemoteHost{})
-	_, err = acmd(t, "remote", "retry", "studio")
+	_, err = acmd(t, "remote", "connect", "studio")
 	errContains(t, err, `no Remote host named "studio"`)
-	f.fail(ipc.OpRemoteHostRetry, `there's no Remote host named "x"`)
-	_, err = acmd(t, "remote", "retry", "x")
+	f.fail(ipc.OpRemoteHostConnect, `there's no Remote host named "x"`)
+	_, err = acmd(t, "remote", "connect", "x")
 	errContains(t, err, "no Remote host")
+}
+
+func TestRemoteDisconnect(t *testing.T) {
+	f := newFakeDaemon(t)
+	var got ipc.RemoteHostRef
+	f.handle(ipc.OpRemoteHostDisconnect, func(data json.RawMessage) (any, error) {
+		must(t, json.Unmarshal(data, &got))
+		return ipc.RemoteHost{Name: "studio", State: ipc.HostDisconnected}, nil
+	})
+	out := mustRun(t, "remote", "disconnect", "studio")
+	if got.Host != "studio" || out != "Disconnected from studio. Connect again with: acmd remote connect studio\n" {
+		t.Errorf("disconnect sent %+v, said %q", got, out)
+	}
+	f.fail(ipc.OpRemoteHostDisconnect, `there's no Remote host named "x"`)
+	_, err := acmd(t, "remote", "disconnect", "x")
+	errContains(t, err, "no Remote host")
+
+	// A command that needs a disconnected host says how to connect it, with its exit code.
+	f.reply(ipc.OpRemoteHosts, []ipc.RemoteHost{{Name: "studio", State: ipc.HostDisconnected}})
+	f.fail(ipc.OpRemoteBrowse, "studio is disconnected: connect it first")
+	_, err = acmd(t, "remote", "browse", "studio")
+	if ExitCode(err) != 15 {
+		t.Errorf("browse a disconnected host: %v (code %d)", err, ExitCode(err))
+	}
+	errContains(t, err, "acmd remote connect studio")
+	if out := mustRun(t, "remote", "list"); !strings.Contains(out, "you disconnected it: acmd remote connect studio") {
+		t.Errorf("list:\n%s", out)
+	}
 }
 
 func TestRemoteBrowse(t *testing.T) {
@@ -755,7 +783,7 @@ func TestRemoteHostsEndToEnd(t *testing.T) {
 		t.Errorf("list while pending:\n%s", out)
 	}
 	mustRun(t, "remote", "authorize", me.Fingerprint(), "--name", "me")
-	if out := mustRun(t, "remote", "retry", "self"); !strings.Contains(out, "Connected to self") {
+	if out := mustRun(t, "remote", "connect", "self"); !strings.Contains(out, "Connected to self") {
 		t.Errorf("retry after approval:\n%s", out)
 	}
 	if out := mustRun(t, "remote", "browse", "self"); !strings.Contains(out, "self has no sessions yet") {
@@ -790,7 +818,7 @@ func TestRemoteHostsEndToEnd(t *testing.T) {
 		t.Errorf("list after remove:\n%s", out)
 	}
 	mustRun(t, "remote", "edit", "wrong", "--fingerprint", me.Fingerprint())
-	if out := mustRun(t, "remote", "retry", "wrong"); !strings.Contains(out, "Connected to wrong") {
+	if out := mustRun(t, "remote", "connect", "wrong"); !strings.Contains(out, "Connected to wrong") {
 		t.Errorf("retry after the edit:\n%s", out)
 	}
 

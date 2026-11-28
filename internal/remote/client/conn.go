@@ -32,6 +32,7 @@ type hostConn struct {
 	tries            int  // dials that ended, connected or not
 	failures         int  // in a row, for the backoff
 	blocked          bool // a fingerprint mismatch: not tried again until the entry changes
+	disconnected     bool // you disconnected it: not dialed until you connect it
 	leaseUntil       time.Time
 	stopped          bool
 	// tree is what the host has, as its event stream says (events.go): kept
@@ -95,9 +96,9 @@ func (h *hostConn) stopLocked() {
 	}
 }
 
-// wantedLocked says whether the host should be connected: always, to show
-// its tree, while it's known.
-func (h *hostConn) wantedLocked() bool { return true }
+// wantedLocked says whether the host should be connected: while it's known,
+// to show its tree, unless you disconnected it.
+func (h *hostConn) wantedLocked() bool { return !h.disconnected }
 
 func (h *hostConn) statusLocked() ipc.RemoteHost {
 	st := ipc.RemoteHost{Version: h.cfg.Version(), Name: h.cfg.Name, Address: h.cfg.Address, Fingerprint: h.cfg.Fingerprint, Cert: h.cfg.Cert,
@@ -119,6 +120,9 @@ func (h *hostConn) errorLocked() error {
 	switch {
 	case h.stopped:
 		return fmt.Errorf("there's no Remote host named %q", h.cfg.Name)
+	case h.disconnected:
+		return &wire.CallError{Op: h.cfg.Name, Code: ipc.CodeHostUnreachable,
+			Message: fmt.Sprintf("%s is disconnected: connect it first", h.cfg.Name)}
 	case h.err != "":
 		return fmt.Errorf("%s: %s", h.cfg.Name, h.err)
 	}
@@ -137,9 +141,9 @@ func (h *hostConn) run() {
 		}
 		h.redial = false
 		wanted, blocked := h.wantedLocked(), h.blocked
-		if !wanted && !blocked && h.state != ipc.HostIdle {
+		if !wanted && h.state != ipc.HostDisconnected {
 			h.failures = 0
-			h.setLocked(ipc.HostIdle, "", time.Time{})
+			h.setLocked(ipc.HostDisconnected, "", time.Time{})
 		}
 		if !wanted || blocked {
 			c.mu.Unlock()
@@ -162,7 +166,7 @@ func (h *hostConn) run() {
 
 		c.mu.Lock()
 		h.tries++
-		if h.stopped || h.redial {
+		if h.stopped || h.redial || !h.wantedLocked() {
 			c.mu.Unlock()
 			if conn != nil {
 				_ = conn.Close()
@@ -211,7 +215,7 @@ func (h *hostConn) run() {
 
 		c.mu.Lock()
 		h.conn = nil
-		if !h.stopped && !h.redial && h.state == ipc.HostConnected {
+		if !h.stopped && !h.redial && h.wantedLocked() && h.state == ipc.HostConnected {
 			h.failures = 1
 			h.setLocked(ipc.HostUnreachable, "the connection dropped", time.Time{})
 		}
@@ -314,9 +318,9 @@ func (h *hostConn) serve(conn *wire.Conn) {
 			return
 		case <-h.kick:
 			c.mu.Lock()
-			redial := h.redial
+			drop := h.redial || !h.wantedLocked()
 			c.mu.Unlock()
-			if redial {
+			if drop {
 				return
 			}
 		case <-c.o.After(c.o.IdleAfter):

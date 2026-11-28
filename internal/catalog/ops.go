@@ -15,7 +15,7 @@ var Local = mustNew(withSessions(withOwnHosts(localOps()))...)
 
 // ownHostOps are this machine's ops on its own Remote hosts.
 var ownHostOps = []string{ipc.OpRemoteHosts, ipc.OpRemoteHostAdd, ipc.OpRemoteHostEdit, ipc.OpRemoteHostRemove,
-	ipc.OpRemoteHostRetry, ipc.OpRemoteBrowse, ipc.OpRemoteNew, ipc.OpRemoteFoldersRecent, ipc.OpRemoteFoldersList,
+	ipc.OpRemoteHostConnect, ipc.OpRemoteHostDisconnect, ipc.OpRemoteBrowse, ipc.OpRemoteNew, ipc.OpRemoteFoldersRecent, ipc.OpRemoteFoldersList,
 	ipc.OpRemoteFoldersMkdir, ipc.OpRemoteHarnesses, ipc.OpRemoteCall, ipc.OpRemoteConfigGet, ipc.OpRemoteConfigSet}
 
 func withOwnHosts(ops []Op) []Op {
@@ -195,7 +195,8 @@ func localOps() []Op {
 		admin(ipc.OpRemoteHostAdd, "Adds a known host.", host, ipc.RemoteHostEdit{}, ipc.RemoteHost{}),
 		admin(ipc.OpRemoteHostEdit, "Changes a known host.", host, ipc.RemoteHostEdit{}, ipc.RemoteHost{}),
 		admin(ipc.OpRemoteHostRemove, "Forgets a known host, and the sessions added from it here.", host, ipc.RemoteHostRef{}, nil).destructive(),
-		act(ipc.OpRemoteHostRetry, "Connects to a known host now, without waiting out the backoff.", host, ipc.RemoteHostRef{}, ipc.RemoteHost{}),
+		act(ipc.OpRemoteHostConnect, "Connects to a known host now, without waiting out the backoff: one you disconnected too.", host, ipc.RemoteHostRef{}, ipc.RemoteHost{}),
+		act(ipc.OpRemoteHostDisconnect, "Closes a known host's connection, and nothing dials it until it's connected again. Its sessions stay, offline.", host, ipc.RemoteHostRef{}, ipc.RemoteHost{}),
 		read(ipc.OpRemoteBrowse, "Connects to a host and lists its own sessions, as it has them now.", host, ipc.RemoteHostRef{}, ipc.RemoteBrowse{}),
 		act(ipc.OpRemoteNew, "Starts a session on a host, in its folder and group there, or resumes one of its agent sessions: it shows in the host's tree.", host, ipc.RemoteNewRequest{}, ipc.Session{}).runsCode().retryable(),
 		read(ipc.OpRemoteFoldersRecent, "Lists a host's recent folders.", host, ipc.RemoteHostRef{}, api.FolderList{}),

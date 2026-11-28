@@ -19,7 +19,7 @@ import Observation
     private(set) var loading = false
     /// Why the host's sessions couldn't be listed, or an Open or Add failed.
     private(set) var error: String?
-    private(set) var retrying: Set<String> = []
+    private(set) var connecting: Set<String> = []
     @ObservationIgnored private var monitor: Any?
     /// Whether a key is the browser's: not one typed in another window.
     @ObservationIgnored var handlesKey: (NSEvent) -> Bool = { _ in true }
@@ -102,11 +102,19 @@ import Observation
         }
     }
 
-    func retry(_ host: RemoteHost) {
-        retrying.insert(host.name)
-        client.retry(host.name) { [weak self] result in
+    func connect(_ host: RemoteHost) {
+        change(host) { $0.connect(host.name, done: $1) }
+    }
+
+    func disconnect(_ host: RemoteHost) {
+        change(host) { $0.disconnect(host.name, done: $1) }
+    }
+
+    private func change(_ host: RemoteHost, _ op: (RemoteHostsClient, @escaping (Result<RemoteHost, Error>) -> Void) -> Void) {
+        connecting.insert(host.name)
+        op(client) { [weak self] result in
             guard let self else { return }
-            self.retrying.remove(host.name)
+            self.connecting.remove(host.name)
             if case .failure(let failure) = result { self.error = errorText(failure) }
             if host.name == self.host?.name { self.load(quiet: true) }
         }
@@ -123,7 +131,7 @@ import Observation
 
     /// The browser's keys, like the Inbox's: the arrows (or ⌃J ⌃K) move, left
     /// and right go between hosts and sessions, return opens, escape goes back.
-    /// n starts a session on the host, r retries and c copies its fingerprint.
+    /// n starts a session on the host, r connects it and c copies its fingerprint.
     func handle(_ combo: KeyCombo) -> Bool {
         let keys = Keymap.shared
         switch keys.action(for: combo, among: [.up, .down, .left, .right, .open, .back, .closePane]) {
@@ -144,8 +152,8 @@ import Observation
             guard combo.mods.isEmpty else { return !combo.mods.contains(.command) }
             if combo == KeyCombo("n"), let host {
                 newSession(host.name)
-            } else if combo == KeyCombo("r"), let host, host.canRetry {
-                retry(host)
+            } else if combo == KeyCombo("r"), let host, host.canConnect {
+                connect(host)
             } else if combo == KeyCombo("c"), let text = host?.message().copy, !text.isEmpty {
                 copy(text)
             }
@@ -179,6 +187,6 @@ import Observation
 
     /// The keys, for the browser's bottom line.
     static func hint(_ keys: Keymap = .shared) -> String {
-        "↑↓ move  ←→ hosts and sessions  return open  n new session  r retry  c copy  esc close"
+        "↑↓ move  ←→ hosts and sessions  return open  n new session  r connect  c copy  esc close"
     }
 }

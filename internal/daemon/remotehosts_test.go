@@ -551,7 +551,26 @@ func TestSessionsFromARemoteHost(t *testing.T) {
 	must(t, call(ipc.OpRemoteFoldersMkdir, ipc.RemoteFolderRequest{Host: "studio", Path: "~/made"}, &folder))
 	var hosts []ipc.RemoteHost
 	must(t, call(ipc.OpRemoteHosts, nil, &hosts))
-	must(t, call(ipc.OpRemoteHostRetry, ipc.RemoteHostRef{Host: "studio"}, &rh))
+	// Disconnected: kept in state.db, its sessions stay listed, and what needs
+	// it is refused until it's connected again.
+	must(t, call(ipc.OpRemoteHostDisconnect, ipc.RemoteHostRef{Host: "studio"}, &rh))
+	if rh.State != ipc.HostDisconnected {
+		t.Errorf("disconnect = %+v", rh)
+	}
+	waitFor(t, "the snapshot to say so", func() bool {
+		snap := snapshot()
+		return len(snap.RemoteHosts) == 1 && snap.RemoteHosts[0].State == ipc.HostDisconnected &&
+			slices.ContainsFunc(snap.Sessions, func(x *ipc.Session) bool { return x.Host == "studio" })
+	})
+	if err := call(ipc.OpRemoteBrowse, ipc.RemoteHostRef{Host: "studio"}, nil); codeOf(err) != ipc.CodeHostUnreachable ||
+		!strings.Contains(err.Error(), "studio is disconnected: connect it first") {
+		t.Errorf("browse a disconnected host: %v", err)
+	}
+	must(t, call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, &rh))
+	waitFor(t, "connected again", func() bool {
+		snap := snapshot()
+		return len(snap.RemoteHosts) == 1 && snap.RemoteHosts[0].State == ipc.HostConnected
+	})
 	// A new session on the host: it's the host's, and shows in its tree.
 	var fresh ipc.Session
 	must(t, call(ipc.OpRemoteNew, ipc.RemoteNewRequest{Host: "studio", Dir: "~", HarnessKind: core.HarnessTerminal, Name: "fresh"}, &fresh))

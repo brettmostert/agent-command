@@ -98,9 +98,14 @@ struct RemoteHostsClient {
         call("remote.hosts.remove", Ref(host: name)) { (result: Result<Nothing, Error>) in done(result.failure) }
     }
 
-    /// Connects now, without waiting out the backoff.
-    func retry(_ name: String, done: @escaping (Result<RemoteHost, Error>) -> Void) {
-        call("remote.hosts.retry", Ref(host: name), done)
+    /// Connects now, without waiting out the backoff: a disconnected host too.
+    func connect(_ name: String, done: @escaping (Result<RemoteHost, Error>) -> Void) {
+        call("remote.hosts.connect", Ref(host: name), done)
+    }
+
+    /// Closes the connection, and nothing connects it until connect.
+    func disconnect(_ name: String, done: @escaping (Result<RemoteHost, Error>) -> Void) {
+        call("remote.hosts.disconnect", Ref(host: name), done)
     }
 
     // MARK: Sessions

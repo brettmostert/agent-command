@@ -15,7 +15,7 @@ private extension KeyedDecodingContainer {
 struct RemoteHost: Decodable, Equatable, Identifiable {
     /// What the daemon says about the connection (ipc.Host*).
     enum State: String, CaseIterable {
-        case idle, connecting, connected, unreachable, pending, unauthorized, version, fingerprint, error
+        case idle, disconnected, connecting, connected, unreachable, pending, unauthorized, version, fingerprint, error
     }
 
     var name = ""
@@ -81,6 +81,7 @@ struct RemoteHost: Decodable, Equatable, Identifiable {
     var stateTitle: String {
         switch state {
         case .idle: "Not connected"
+        case .disconnected: "Disconnected"
         case .connecting: "Connecting…"
         case .connected: "Connected"
         case .unreachable: "Can't reach it"
@@ -93,16 +94,20 @@ struct RemoteHost: Decodable, Equatable, Identifiable {
     }
 
     /// Whether the state is a problem to show in red.
-    var isFailing: Bool { ![.idle, .connecting, .connected, .pending].contains(state) }
+    var isFailing: Bool { ![.idle, .disconnected, .connecting, .connected, .pending].contains(state) }
 
-    /// Whether Retry can help: not while it's connecting or connected.
-    var canRetry: Bool { state != .connecting && state != .connected }
+    /// You disconnected it: nothing connects it until you connect it.
+    var isDisconnected: Bool { state == .disconnected }
+
+    /// Whether Connect can help: not while it's connecting or connected.
+    var canConnect: Bool { state != .connecting && state != .connected }
 
     /// What a row of one of its sessions says while it isn't connected: nil when it is.
     var offlineNote: String? {
         switch state {
         case .connected: nil
         case .idle, .connecting, .unreachable: "reconnecting…"
+        case .disconnected: "disconnected"
         case .pending: "waiting for approval"
         case .unauthorized: "not authorized"
         case .version: "version mismatch"
@@ -117,7 +122,9 @@ struct RemoteHost: Decodable, Equatable, Identifiable {
         let retry = RemoteTime.until(retryAt, now: now).map { " Trying again \($0)." } ?? " Trying again soon."
         switch state {
         case .idle:
-            return RemoteHostMessage(text: "Not connected. It connects when you browse it or open one of its sessions.")
+            return RemoteHostMessage(text: "Not connected. It connects in a moment.")
+        case .disconnected:
+            return RemoteHostMessage(text: "Disconnected. Nothing connects to \(name) until you choose Connect.")
         case .connecting:
             return RemoteHostMessage(text: "Connecting to \(address)…")
         case .connected:

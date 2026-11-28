@@ -157,10 +157,10 @@ func TestRemoteHostingCommands(t *testing.T) {
 	if len(clients) != 1 || clients[0].Name != "laptop" || len(clients[0].Connections) != 1 {
 		t.Errorf("clients --json = %+v", clients)
 	}
-	if out := mustRun(t, "remote", "disconnect", "laptop"); out != "Disconnected laptop: closed 1 connection.\n" {
+	if out := mustRun(t, "remote", "drop", "laptop"); out != "Dropped laptop: closed 1 connection.\n" {
 		t.Errorf("disconnect: %q", out)
 	}
-	if _, err := acmd(t, "remote", "disconnect", "laptop"); err == nil {
+	if _, err := acmd(t, "remote", "drop", "laptop"); err == nil {
 		t.Error("disconnected twice")
 	}
 

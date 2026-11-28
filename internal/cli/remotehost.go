@@ -247,9 +247,9 @@ func newRemoteRevokeCmd() *cobra.Command {
 	}
 }
 
-func newRemoteDisconnectCmd() *cobra.Command {
+func newRemoteDropCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "disconnect <name|fingerprint|connection>",
+		Use:   "drop <name|fingerprint|connection>",
 		Short: "Drop a client's connections now (it stays authorized, and can reconnect)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -257,7 +257,7 @@ func newRemoteDisconnectCmd() *cobra.Command {
 			if err := remoteCall(cmd, ipc.OpRemoteDisconnect, ipc.RemoteRef{Client: args[0]}, &n); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Disconnected %s: closed %s.\n", args[0], plural(n.Closed, "connection"))
+			fmt.Fprintf(cmd.OutOrStdout(), "Dropped %s: closed %s.\n", args[0], plural(n.Closed, "connection"))
 			return nil
 		},
 	}

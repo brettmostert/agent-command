@@ -42,7 +42,7 @@ func (d *Daemon) startRemoteHosts(ctx context.Context) {
 
 func isRemoteHostsOp(op string) bool {
 	switch op {
-	case ipc.OpRemoteHosts, ipc.OpRemoteHostAdd, ipc.OpRemoteHostEdit, ipc.OpRemoteHostRemove, ipc.OpRemoteHostRetry,
+	case ipc.OpRemoteHosts, ipc.OpRemoteHostAdd, ipc.OpRemoteHostEdit, ipc.OpRemoteHostRemove, ipc.OpRemoteHostConnect, ipc.OpRemoteHostDisconnect,
 		ipc.OpRemoteBrowse, ipc.OpRemoteNew,
 		ipc.OpRemoteFoldersRecent, ipc.OpRemoteFoldersList, ipc.OpRemoteFoldersMkdir, ipc.OpRemoteHarnesses, ipc.OpRemoteCall:
 		return true
@@ -82,8 +82,10 @@ func (d *Daemon) handleRemoteHosts(ctx context.Context, req ipc.Request) (any, e
 		return c.EditHost(ctx, e)
 	case ipc.OpRemoteHostRemove:
 		return nil, c.RemoveHost(ctx, ref.Host)
-	case ipc.OpRemoteHostRetry:
-		return c.Retry(ref.Host)
+	case ipc.OpRemoteHostConnect:
+		return c.Connect(ref.Host)
+	case ipc.OpRemoteHostDisconnect:
+		return c.Disconnect(ref.Host)
 	case ipc.OpRemoteBrowse:
 		return c.Browse(ctx, ref.Host)
 	case ipc.OpRemoteNew:

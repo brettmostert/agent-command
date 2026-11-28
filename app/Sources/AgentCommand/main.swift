@@ -139,6 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         store.onSelect = { [weak self] session in self?.activate(session) }
         pane.session = { [weak store] id in store?.sessions.first { $0.id == id } }
         pane.onActivate = { [weak self] session in self?.activate(session) }
+        pane.isDisconnected = { [weak store] session in store?.isDisconnected(session) == true }
+        pane.onConnect = { [weak self] host in self?.knownHosts.connect(RemoteHost(name: host)) }
+        store.onHostsChanged = { [weak pane] in pane?.hostsChanged() }
         pane.makeHeader = { [weak store] id, onTap in
             guard let store else { return NSView() }
             return NSHostingView(rootView: PaneHeader(store: store, sessionID: id, onTap: onTap))

@@ -158,18 +158,20 @@ func makeRemoteSession(
 @Test func hostStatesForListsAndRows() {
     let titles = RemoteHost.State.allCases.map { RemoteHost(name: "h", state: $0).stateTitle }
     #expect(titles == [
-        "Not connected", "Connecting…", "Connected", "Can't reach it", "Waiting for approval", "Not authorized",
+        "Not connected", "Disconnected", "Connecting…", "Connected", "Can't reach it", "Waiting for approval", "Not authorized",
         "Version mismatch", "Fingerprint mismatch", "Error",
     ])
     let notes = RemoteHost.State.allCases.map { RemoteHost(name: "h", state: $0).offlineNote }
     #expect(notes == [
-        "reconnecting…", "reconnecting…", nil, "reconnecting…", "waiting for approval", "not authorized",
+        "reconnecting…", "disconnected", "reconnecting…", nil, "reconnecting…", "waiting for approval", "not authorized",
         "version mismatch", "fingerprint mismatch", "can't connect",
     ])
     let failing = RemoteHost.State.allCases.filter { RemoteHost(name: "h", state: $0).isFailing }
     #expect(failing == [.unreachable, .unauthorized, .version, .fingerprint, .error])
-    let retries = RemoteHost.State.allCases.filter { RemoteHost(name: "h", state: $0).canRetry }
-    #expect(!retries.contains(.connecting) && !retries.contains(.connected) && retries.count == 7)
+    let connects = RemoteHost.State.allCases.filter { RemoteHost(name: "h", state: $0).canConnect }
+    #expect(!connects.contains(.connecting) && !connects.contains(.connected) && connects.count == 8)
+    #expect(RemoteHost(name: "h", state: .disconnected).isDisconnected && !RemoteHost(name: "h", state: .unreachable).isDisconnected)
+    #expect(RemoteHost(name: "studio", state: .disconnected).message().text == "Disconnected. Nothing connects to studio until you choose Connect.")
 }
 
 @Test func timeUntilARetry() throws {

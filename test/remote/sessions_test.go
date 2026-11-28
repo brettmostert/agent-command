@@ -228,7 +228,7 @@ func TestRevoke(t *testing.T) {
 	if d := time.Since(revoked); d > time.Second {
 		t.Errorf("the client was still connected %v after the revoke", d)
 	}
-	laptop.call(ipc.OpRemoteHostRetry, ipc.RemoteHostRef{Host: "studio"}, nil)
+	laptop.call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, nil)
 	// An authorized client that's revoked is unknown again, so it asks again.
 	h := laptop.waitHost("studio", ipc.HostPending)
 	t.Logf("after the revoke: %s (%s)", h.State, h.Error)
@@ -248,7 +248,7 @@ func TestRevoke(t *testing.T) {
 		return len(reqs) == 1
 	})
 	host.call(ipc.OpRemoteApprove, ipc.RemoteRef{ID: reqs[0].ID, Name: "laptop"}, nil)
-	laptop.call(ipc.OpRemoteHostRetry, ipc.RemoteHostRef{Host: "studio"}, nil)
+	laptop.call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, nil)
 	laptop.waitHost("studio", ipc.HostConnected)
 	host.typeIn(s.ID, "echo back-$((5+5))\n")
 	p.sees(t, "back-10")
@@ -280,6 +280,49 @@ func TestHostRestart(t *testing.T) {
 	if got := laptop.session(local.ID); got == nil || got.HostGone {
 		t.Errorf("snapshot = %+v", got)
 	}
+}
+
+// TestDisconnectAHost: the client disconnects from a host. Its session stays
+// listed, and a pane waits; connected again, the pane carries on. It stays
+// disconnected across the client's restart, until it's connected.
+func TestDisconnectAHost(t *testing.T) {
+	host := newMachine(t, "host", hostConfig(freePort(t), true))
+	host.start()
+	s := host.newSession("shared", true)
+	laptop := newMachine(t, "laptop", clientConfig)
+	laptop.start()
+	laptop.pair("studio", host)
+	local := laptop.hostSession("studio", s.ID)
+
+	laptop.call(ipc.OpRemoteHostDisconnect, ipc.RemoteHostRef{Host: "studio"}, nil)
+	host.waitFor("the laptop to go", func() bool { return host.status().Connected == 0 })
+	if got := laptop.session(local.ID); got == nil {
+		t.Error("its session went")
+	}
+	p := attach(t, laptop.p.HostSocket(local.ID), 24, 80)
+	time.Sleep(300 * time.Millisecond)
+	if st := host.status(); st.Connected != 0 {
+		t.Errorf("a pane connected it: %+v", st)
+	}
+	laptop.call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, nil)
+	laptop.waitHost("studio", ipc.HostConnected)
+	host.typeIn(s.ID, "echo back-$((3+4))\n")
+	p.sees(t, "back-7")
+
+	laptop.call(ipc.OpRemoteHostDisconnect, ipc.RemoteHostRef{Host: "studio"}, nil)
+	host.waitFor("the laptop to go", func() bool { return host.status().Connected == 0 })
+	laptop.stop()
+	laptop.start()
+	time.Sleep(500 * time.Millisecond)
+	if st := host.status(); st.Connected != 0 {
+		t.Errorf("the laptop connected after its restart: %+v", st)
+	}
+	if h := laptop.knownHost("studio"); h.State != ipc.HostDisconnected {
+		t.Errorf("after a restart: %+v", h)
+	}
+	laptop.call(ipc.OpRemoteHostConnect, ipc.RemoteHostRef{Host: "studio"}, nil)
+	laptop.waitHost("studio", ipc.HostConnected)
+	laptop.hostSession("studio", s.ID)
 }
 
 // TestTwoHosts: one client uses sessions on two hosts at once.

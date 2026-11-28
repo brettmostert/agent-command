@@ -67,7 +67,7 @@ func TestClientScopes(t *testing.T) {
 	must(t, s.AddAuthorizedClient(ctx, config.AuthorizedClient{Name: "old", Fingerprint: "SHA256:o"}))
 	// Back to before scopes, and up again: clients from then keep admin.
 	for _, q := range []string{`ALTER TABLE remote_clients DROP COLUMN scope`, `DROP TABLE requests`, `DROP TABLE harnesses`, `ALTER TABLE sessions DROP COLUMN harness_id`, `ALTER TABLE sessions RENAME COLUMN harness_kind TO harness`,
-		`ALTER TABLE sessions ADD COLUMN bg_id TEXT NOT NULL DEFAULT ''`, `ALTER TABLE sessions ADD COLUMN external TEXT NOT NULL DEFAULT ''`, `ALTER TABLE groups DROP COLUMN parent_id`, `ALTER TABLE groups DROP COLUMN path`, `ALTER TABLE groups ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE groups ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE view_state (id INTEGER PRIMARY KEY, state TEXT NOT NULL)`, `PRAGMA user_version = 16`} {
+		`ALTER TABLE sessions ADD COLUMN bg_id TEXT NOT NULL DEFAULT ''`, `ALTER TABLE sessions ADD COLUMN external TEXT NOT NULL DEFAULT ''`, `ALTER TABLE groups DROP COLUMN parent_id`, `ALTER TABLE groups DROP COLUMN path`, `ALTER TABLE groups ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`, `ALTER TABLE groups ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0`, `CREATE TABLE view_state (id INTEGER PRIMARY KEY, state TEXT NOT NULL)`, `DROP TABLE remote_hosts_disconnected`, `PRAGMA user_version = 16`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -114,5 +114,22 @@ func TestRequests(t *testing.T) {
 	must(t, s.SaveRequest(ctx, Request{ID: "r2", Op: "job.run", Result: []byte(`{"n":2}`), At: t0.Add(21 * time.Minute)}, t0))
 	if got, _ := s.Request(ctx, "r2", time.Time{}); string(got.Result) != `{"n":2}` {
 		t.Errorf("replaced = %s", got.Result)
+	}
+}
+
+func TestDisconnectedHosts(t *testing.T) {
+	s, _ := open(t)
+	must(t, s.SetHostDisconnected(ctx, "studio", true))
+	must(t, s.SetHostDisconnected(ctx, "studio", true)) // twice is once
+	must(t, s.SetHostDisconnected(ctx, "mini", true))
+	got, err := s.DisconnectedHosts(ctx)
+	must(t, err)
+	if !reflect.DeepEqual(got, []string{"mini", "studio"}) {
+		t.Fatalf("got %v", got)
+	}
+	must(t, s.SetHostDisconnected(ctx, "studio", false))
+	must(t, s.SetHostDisconnected(ctx, "gone", false))
+	if got, _ = s.DisconnectedHosts(ctx); !reflect.DeepEqual(got, []string{"mini"}) {
+		t.Fatalf("got %v", got)
 	}
 }
