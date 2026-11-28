@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.100.0](https://github.com/brettmostert/agent-command/compare/v0.99.0...v0.100.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* session.list replaces conversations: resume a Remote host's sessions, filter by where, harness names ([#224](https://github.com/brettmostert/agent-command/issues/224))
+
+### Features
+
+* session.list replaces conversations: resume a Remote host's sessions, filter by where, harness names ([#224](https://github.com/brettmostert/agent-command/issues/224)) ([32a05e1](https://github.com/brettmostert/agent-command/commit/32a05e15e6a3f7db9ebbd2f9d917310f0ae6d0f6))
+
 ## [0.99.0](https://github.com/brettmostert/agent-command/compare/v0.98.0...v0.99.0) (2026-11-27)
 
 
