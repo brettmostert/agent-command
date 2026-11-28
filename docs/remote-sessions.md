@@ -108,9 +108,17 @@ On the client:
 
 **Notifications** follow you: a host shows each notification on the machine you're using, as `notify.route` says (`one`, the default, or `all`). Each paired machine counts as one client there, active while you use any of its apps, and passes the notification on to its app you're using. A change you make from a machine is recorded on the host with the app that made it.
 
-A host's sessions show with "↗ studio". While the host can't be reached, their rows are greyed and reconnect by themselves.
+A host's sessions show with "↗ studio". While the host can't be reached, their rows are greyed and reconnect by themselves. A change you make to one (renaming, archiving, moving it between the host's groups) is made on the host, so every client of the host sees the same tree. A host's sessions stay in its own groups and sets: they can't be moved into this Mac's.
 
-**Disconnecting a host.** To stop using a host for a while without removing it: Settings → Remote → Known hosts → its menu → **Disconnect**, or `acmd remote disconnect studio`. The connection closes, and nothing tries to connect until you choose **Connect** there, or run `acmd remote connect studio`. It stays disconnected across restarts. Its sessions stay in the sidebar, greyed with "disconnected", and keep running on the host. Opening one offers **Connect**. Anything else that needs the host is refused with `studio is disconnected: connect it first` (exit 15). The host's tree is kept in memory only: after this Mac's daemon restarts, a disconnected host's sessions show again once you connect it. A change you make to one (renaming, archiving, moving it between the host's groups) is made on the host, so every client of the host sees the same tree. A host's sessions stay in its own groups and sets: they can't be moved into this Mac's.
+**Disconnecting a host.** To stop using a host for a while without removing it, choose **Disconnect**: in Settings → Remote → Known hosts, in the host's menu, or in the Remote Hosts browser. On the command line, run `acmd remote disconnect studio`. The connection closes, and nothing tries to connect until you choose **Connect** in either place, or run `acmd remote connect studio`. It stays disconnected across restarts, hosts listed in config.toml too.
+
+While it's disconnected:
+
+- Its sessions stay in the sidebar, greyed with "disconnected", and keep running on the host.
+- Opening one shows "studio is disconnected. Click to connect it" in its pane. A pane that was already open waits, and carries on once you connect.
+- Anything else that needs the host is refused with `studio is disconnected: connect it first` (exit 15). That includes browsing it, starting a session there, and `acmd --host studio`.
+
+This Mac keeps a host's sessions in memory only. After this Mac's daemon restarts, a disconnected host's sessions show again once you connect it.
 
 Once a known host exists, the sidebar has a filter next to "Sessions": All, Local (the sessions that run on this Mac, Remote ones included), Remote (every host's sessions), or one host's sessions.
 
