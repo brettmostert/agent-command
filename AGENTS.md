@@ -19,7 +19,7 @@ Instructions for coding agents working in this repo, whatever the harness. `CONT
 
 Once the gates pass, ship without asking, with the `gh` CLI over HTTPS:
 
-1. Make a branch, and a PR whose title is a Conventional Commit (`feat:`, `fix:`, `docs:` and so on). The title becomes the commit message.
+1. Make a branch, and a PR whose title is a Conventional Commit (`feat:`, `fix:`, `docs:` and so on). The title becomes the commit message. The subject after the colon must start with a lowercase letter, even when it starts with a name such as README or Windows (`docs: the README's install section`, not `docs: README install section`); the `pr-title` check fails otherwise. `CONTRIBUTING.md` has the full rules.
 2. Wait for every check to pass (`gh pr checks <n> --watch`), then squash-merge.
 3. Merge release-please's release PR (`chore(main): release X.Y.Z`, labelled `autorelease: pending`).
 4. Wait for the `release` workflow, and confirm the release published (`gh release list`).
