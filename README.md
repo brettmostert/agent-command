@@ -82,12 +82,19 @@ While attach and watch run, they count as this machine's terminal client, so `no
 
 ## Install
 
-There are two ways to install on a Mac or Linux machine:
+acmd is the one program every machine needs. It runs the daemon, the sessions and the Claude Code hooks, and it's the CLI and the terminal UI. An app is a client of it, and optional. So there are two things you can install:
 
-- **The app and acmd**, for a Mac you use: the app's cask installs acmd with it.
-- **acmd only**, for a headless machine, one with no screen, or one you reach only from another: Linux (amd64 and arm64, any distribution), WSL2, or a Mac. Install it with Homebrew, or with the [install script](#acmd-only-with-the-install-script), which needs no Homebrew and no sudo.
+- **The app and acmd**, for a machine you sit at: the Mac app, or the Linux UI on a Linux desktop.
+- **acmd only**, for a headless machine, one with no screen, or one you reach only from another. You use it with `acmd` and its terminal UI, or from another machine's app through [Remote sessions](#remote-sessions). On Windows it's always acmd only.
 
-Either way, acmd runs the daemon, the sessions and the Claude Code hooks. The app is one client of it.
+| | macOS 26 or later, Apple Silicon | Linux (amd64, arm64) and WSL2 | Windows 10 1803 or later, or 11 (amd64, arm64) |
+| -- | -- | -- | -- |
+| **The app and acmd** | [Homebrew cask](#the-app-and-acmd) | acmd any way below, then [build the Linux UI](#the-linux-ui) | No app |
+| **acmd only, with Homebrew** | [Homebrew formula](#acmd-only) | [Homebrew formula](#acmd-only) | No |
+| **acmd only, with the install script** | [`install.sh`](#acmd-only-with-the-install-script) | [`install.sh`](#acmd-only-with-the-install-script) | [`install.ps1`](#windows) |
+| **acmd only, with Scoop** | No | No | [Scoop](#windows) |
+
+**Homebrew, Scoop or the install script?** Each installs the same acmd from the same release, and each runs `acmd init`. Homebrew and Scoop upgrade it with the rest of what they manage. The install scripts need no Homebrew, no Scoop, no sudo and no admin, and upgrade acmd when you run them again. Use one of them per machine: two copies of acmd would mean two daemons, so an install script stops if acmd from Homebrew or Scoop is installed. The Mac app comes only as a cask, so it needs Homebrew.
 
 ### The app and acmd
 
@@ -150,6 +157,24 @@ It downloads the latest release, checks its SHA-256, and installs acmd in `~/.lo
 | `--no-init` | `ACMD_NO_INIT=1` | Skips `acmd init`. |
 | `--uninstall` | `ACMD_UNINSTALL=1` | Runs `acmd uninstall --yes`, then removes acmd and its links. |
 
+### The Linux UI
+
+The Linux UI is a GTK4 app for a Linux desktop. Releases don't include it yet, so build it from a clone of this repo, with the Go version `go.mod` names, a C compiler, pkg-config, and the GTK4, libadwaita and VTE (GTK4) libraries:
+
+```sh
+# Debian and Ubuntu
+sudo apt-get install gcc pkg-config libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev
+# Arch
+sudo pacman -S --needed base-devel gtk4 libadwaita vte4
+
+git clone https://github.com/brettmostert/agent-command && cd agent-command
+git checkout "v$(acmd version | cut -d' ' -f2)"   # the release of the acmd you run
+make linux-ui
+install -m 755 dist/agent-command-ui ~/.local/bin/
+```
+
+Install acmd first, any way above, so the checkout matches it. acmd looks for `agent-command-ui` next to itself, then on your PATH. With it there, `acmd` on a desktop opens the Linux UI, and `acmd --terminal` opens the terminal UI instead. acmd is in beta and what it sends its clients can change, so when you upgrade acmd, check out the new release and build the Linux UI again.
+
 ### The service
 
 `acmd init` installs the service, which runs acmd's daemon as you: a launchd agent on macOS (`~/Library/LaunchAgents/com.brettmostert.agent-command.daemon.plist`), which starts it at login, and a systemd user unit on Linux and WSL2 (`~/.config/systemd/user/agent-command.service`), which starts it at boot with lingering on. Sessions keep running when it restarts. `acmd service status` says whether it's installed and running, `acmd service install` puts it back, and `acmd service uninstall` removes it; without it, the daemon starts when something needs it. WSL2 needs systemd turned on (`[boot] systemd=true` in `/etc/wsl.conf`, then `wsl --shutdown`). `acmd daemon restart` and `acmd daemon stop` go through the service.
@@ -158,7 +183,7 @@ It downloads the latest release, checks its SHA-256, and installs acmd in `~/.lo
 
 ### Uninstall acmd
 
-Run `acmd uninstall` first: it ends running sessions, stops the daemon, removes its service and the hooks, and asks whether to keep your sessions and settings (`--keep-data=false` deletes them). Then run `brew uninstall acmd`, after removing the app if it's installed. Homebrew has no way for a formula to do that itself. After an uninstall, Claude conversations can still be resumed, and with your data kept, terminals come back as new shells in the same folders.
+Run `acmd uninstall` first: it ends running sessions, stops the daemon, removes its service and the hooks, and asks whether to keep your sessions and settings (`--keep-data=false` deletes them). Then remove acmd the way you installed it: `brew uninstall acmd`, after removing the app if it's installed (Homebrew has no way for a formula to run `acmd uninstall` itself). With the install script, `--uninstall` does both steps: it runs `acmd uninstall --yes`, which keeps your sessions and settings, then removes acmd. After an uninstall, Claude conversations can still be resumed, and with your data kept, terminals come back as new shells in the same folders.
 
 ### Windows
 
