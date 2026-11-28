@@ -27,7 +27,7 @@ const minIDPrefix = 8
 const maxLine = 1 << 20
 
 // ErrNoConversation means no conversation has that id.
-var ErrNoConversation = errors.New("no Antigravity conversation has that id")
+var ErrNoConversation = errors.New("no Antigravity session has that id")
 
 // Conversation is an earlier agy conversation, from agy's prompt history.
 type Conversation struct {
@@ -75,7 +75,7 @@ func FindConversation(dir, id string) (Conversation, error) {
 	case 1:
 		return found[0], nil
 	}
-	return Conversation{}, fmt.Errorf("%d Antigravity conversations start with %s: use more of the id", len(found), id)
+	return Conversation{}, fmt.Errorf("%d Antigravity sessions start with %s: use more of the id", len(found), id)
 }
 
 // historyLine is one prompt in history.jsonl.

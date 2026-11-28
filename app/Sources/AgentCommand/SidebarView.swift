@@ -117,13 +117,15 @@ struct SidebarView: View {
                         heading("Sessions")
                         filterMenu.padding(.bottom, 2)
                         viewMenu.padding(.bottom, 2)
-                        Spacer()
+                        Spacer(minLength: 0)
                         if store.sidebarFocused {
                             Text(sidebarHint)
                                 .font(AppFont.ui(11))
                                 .foregroundStyle(theme.dim)
                                 .padding(.horizontal, 12)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
+                                .layoutPriority(-1)
                         }
                     }
                     if rows.isEmpty {
@@ -403,6 +405,9 @@ struct SidebarView: View {
         Text(title)
             .fontWeight(.bold)
             .foregroundStyle(theme.magenta)
+            .lineLimit(1)
+            // Never squeezed: a narrow sidebar truncates the key hint instead.
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 12)
             .padding(.bottom, 2)
     }
@@ -598,6 +603,12 @@ struct SessionRow: View {
                             .lineLimit(1)
                             .truncationMode(.head)
                             .help(session.cwd)
+                        Spacer(minLength: 4)
+                        // Under the status: what it runs in.
+                        Text(session.harnessTitle)
+                            .foregroundStyle(isSelected ? theme.bg : theme.dim)
+                            .lineLimit(1)
+                            .layoutPriority(1)
                     }
                     .font(AppFont.ui(11))
                     .padding(.leading, 14)

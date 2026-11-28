@@ -49,6 +49,21 @@ func (d *Daemon) harnessList(ctx context.Context) []core.Harness {
 	return hs
 }
 
+// nameHarnesses gives each session its harness's name, as it goes to clients.
+// A terminal's, or one whose harness is gone, stays "": the wire shows its
+// kind's title.
+func (d *Daemon) nameHarnesses(ctx context.Context, sessions ...*core.Session) {
+	names := map[string]string{}
+	for _, h := range d.harnessList(ctx) {
+		names[h.ID] = h.Name
+	}
+	for _, s := range sessions {
+		if s != nil && s.Host == "" {
+			s.HarnessName = names[s.HarnessID]
+		}
+	}
+}
+
 // harnessOf is the harness with id (nil when there's none).
 func (d *Daemon) harnessOf(ctx context.Context, id string) *core.Harness {
 	if id == "" {

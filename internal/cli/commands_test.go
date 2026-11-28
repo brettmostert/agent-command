@@ -230,6 +230,70 @@ func TestListCommand(t *testing.T) {
 	}
 }
 
+// Each filter is a flag, and --filter key=value is the same filter; --filter
+// with no key (or an unknown one) is text. Different filters must all match,
+// and one given twice matches either value.
+func TestListFilters(t *testing.T) {
+	env(t)
+	same := func(a, b []string) {
+		t.Helper()
+		if x, y := names(listJSON(t, a...)), names(listJSON(t, b...)); x != y {
+			t.Errorf("%v = %q, but %v = %q", a, x, b, y)
+		}
+	}
+	same([]string{"--status", "waiting,busy"}, []string{"--filter", "status=waiting", "--filter", "status=busy"})
+	same([]string{"--status", "waiting", "--status", "busy"}, []string{"--filter", "status=waiting,busy"})
+	same([]string{"--on", "local"}, []string{"--filter", "on=local"})
+	same([]string{"--filter", "flaky"}, []string{"--filter", "text=flaky"})
+	if got := names(listJSON(t, "--on", "local")); got != "refactor auth middleware | fix flaky e2e test | docs: hooks reference" {
+		t.Errorf("--on local: %s", got)
+	}
+	if got := names(listJSON(t, "--on", "remote")); got != "" {
+		t.Errorf("--on remote with no hosts: %s", got)
+	}
+	if got := names(listJSON(t, "--status", "busy", "--filter", "flaky")); got != "" {
+		t.Errorf("busy and flaky: %s, want none: both must match", got)
+	}
+	if got := names(listJSON(t, "--filter", "a=b")); got != "" {
+		t.Errorf("an unknown key is text: %s", got)
+	}
+	if got := names(listJSON(t, "--harness", "Nope")); got != "" {
+		t.Errorf("--harness Nope: %s", got)
+	}
+	if _, err := acmd(t, "list", "--on", "studio"); ExitCode(err) != exitNotFound || !strings.Contains(err.Error(), "acmd remote list") {
+		t.Errorf("an unknown host: %v", err)
+	}
+	if _, err := acmd(t, "list", "--filter", "resumable=maybe"); ExitCode(err) != exitUsage {
+		t.Errorf("resumable=maybe: %v", err)
+	}
+	if out := mustRun(t, "list"); !strings.Contains(out, "HARNESS") {
+		t.Errorf("no harness column:\n%s", out)
+	}
+
+	// Resumable: only what's stopped, with its agent id.
+	if out := mustRun(t, "list", "--resumable"); !strings.Contains(out, "Nothing to resume.") {
+		t.Errorf("nothing stopped yet:\n%s", out)
+	}
+	docs := listJSON(t, "--filter", "docs")[0]
+	mustRun(t, "finish", docs.ID, "--yes")
+	out := mustRun(t, "list", "--filter", "resumable=true")
+	for _, want := range []string{"AGENT ID", docs.ID, "c-docs", "finished"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resumable is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "refactor auth middleware") {
+		t.Errorf("a running session is resumable:\n%s", out)
+	}
+	if out := mustRun(t, "list", "--resumable", "--filter", "nothing-like-it"); !strings.Contains(out, "Nothing to resume.") {
+		t.Errorf("text narrows resumable too:\n%s", out)
+	}
+	// An id nothing has is still not found.
+	if _, err := acmd(t, "resume", "deadbeef-0000"); err == nil {
+		t.Errorf("resume an unknown id: %v", err)
+	}
+}
+
 // The view is the command's own, each time: nothing a list was given stays.
 func TestListKeepsNoView(t *testing.T) {
 	env(t)

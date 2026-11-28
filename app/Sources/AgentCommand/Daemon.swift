@@ -434,9 +434,17 @@ nonisolated struct Session: Decodable, Identifiable, Equatable {
     /// What can be done with it now. The daemon decides; the app offers only these,
     /// and ignores ones it doesn't know.
     var capabilities: [String]?
+    /// Its harness's name, as its own machine has it ("Work"), or its kind's
+    /// ("Claude", "Terminal") when that harness is gone.
+    var harnessName: String?
+    /// Only in the list of what can be resumed: the git branch its agent last
+    /// recorded, and whether the agent says it's live, maybe in another terminal.
+    var branch: String?
+    var agentLive: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case agent, capabilities
+        case agent, capabilities, branch
+        case harnessName = "harness_name", agentLive = "agent_live"
         case display = "display_name"
         case id, name, cwd, status, kind, unseen, description, remote, host, parent, order, attention
         case harnessKind = "harness_kind", harnessID = "harness_id"
@@ -471,6 +479,9 @@ nonisolated struct Session: Decodable, Identifiable, Equatable {
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         display = try c.decodeIfPresent(String.self, forKey: .display)
         capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities)
+        harnessName = try c.decodeIfPresent(String.self, forKey: .harnessName)
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        agentLive = try c.decodeIfPresent(Bool.self, forKey: .agentLive)
     }
 
     var isRemote: Bool { remote == true }
@@ -515,13 +526,35 @@ nonisolated struct Session: Decodable, Identifiable, Equatable {
     /// The harness it runs in, or its kind when that was removed; a terminal.
     /// A host's session runs in one of the host's harnesses: it shows its kind.
     @MainActor var harness: Harness { isOnHost ? Harness(kind: harnessKind.isEmpty ? "claude" : harnessKind) : Harness.resolve(id: harnessID, kind: harnessKind) }
-    /// Its harness's name ("Claude", "Work"), or "Terminal".
-    @MainActor var harnessTitle: String { harness.title }
+    /// Its harness's name ("Claude", "Work"), or "Terminal", as the daemon says it:
+    /// a host's session has its host's name for it.
+    @MainActor var harnessTitle: String {
+        if let harnessName, !harnessName.isEmpty { return harnessName }
+        return harness.title
+    }
     var isArchived: Bool { status == "archived" }
 
     var displayName: String {
         if let display, !display.isEmpty { return display }
         return name.isEmpty ? (cwd as NSString).lastPathComponent : name
+    }
+
+    /// When it was last active, as far as RFC 3339 can be parsed.
+    var lastActive: Date? {
+        guard let lastEventAt else { return nil }
+        let plain = ISO8601DateFormatter()
+        let precise = ISO8601DateFormatter()
+        precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return precise.date(from: lastEventAt) ?? plain.date(from: lastEventAt)
+    }
+
+    /// Where a search (lowercased) matches it, for the Resume window: 0 its name,
+    /// 1 its id (acmd's or its agent's), 2 its folder; nil for none.
+    func resumeRank(_ query: String) -> Int? {
+        if displayName.lowercased().contains(query) { return 0 }
+        if id.lowercased().contains(query) || claudeSessionID.lowercased().contains(query) { return 1 }
+        if cwd.lowercased().contains(query) { return 2 }
+        return nil
     }
 }
 
@@ -531,39 +564,6 @@ nonisolated enum SessionCapability: String {
     case resume, attach, archive, unarchive, purge
     case continueInJob = "continue_in_job"
     case openInEditor = "open_in_editor", setRemote = "set_remote"
-}
-
-/// An earlier agent conversation that can be resumed (internal/ipc.Conversation).
-nonisolated struct Conversation: Decodable, Identifiable, Hashable {
-    let id: String
-    /// The harness whose history it's in, and its kind.
-    var harness_id: String? = nil
-    var harness_kind: String? = nil
-    let cwd: String
-    let title: String?
-    let branch: String?
-    let updated_at: String
-    let running: Bool?
-    let session_id: String?
-
-    var displayTitle: String { title ?? "Untitled" }
-    /// The harness it's from.
-    @MainActor var harness: Harness { Harness.resolve(id: harness_id ?? "", kind: harness_kind ?? "claude") }
-    var isRunning: Bool { running == true }
-
-    /// The time, as far as RFC 3339 can be parsed.
-    var updated: Date? {
-        let plain = ISO8601DateFormatter()
-        let precise = ISO8601DateFormatter()
-        precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return precise.date(from: updated_at) ?? plain.date(from: updated_at)
-    }
-
-    @MainActor func matches(_ search: String) -> Bool {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return true }
-        return [displayTitle, cwd, branch ?? "", id, harness.title].contains { $0.lowercased().contains(query) }
-    }
 }
 
 nonisolated struct DaemonError: LocalizedError {

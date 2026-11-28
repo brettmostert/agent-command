@@ -96,11 +96,13 @@ type JobRunPage struct {
 	NextCursor string        `json:"next_cursor"`
 }
 
-// ConversationPage is a page of earlier conversations, the most recently
-// active first.
-type ConversationPage struct {
-	Items      []Conversation `json:"items"`
-	NextCursor string         `json:"next_cursor"`
+// SessionPage is a page of sessions (session.list), the most recently active
+// first. Unreached are the hosts that were asked and didn't answer: their
+// sessions aren't in it.
+type SessionPage struct {
+	Items      []*Session `json:"items"`
+	NextCursor string     `json:"next_cursor"`
+	Unreached  []string   `json:"unreached,omitempty"`
 }
 
 // PageOf is the page of list, already in order, from p's offset.

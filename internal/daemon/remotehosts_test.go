@@ -38,10 +38,12 @@ type otherDaemon struct {
 	sets     []ipc.Set
 	inbox    []core.InboxItem
 	ran      []string // the ops run on it through call
-	notices  []ipc.Notice
-	sockets  map[string]string
-	rev      uint64
-	ch       chan struct{}
+	// resumable is what its session.list answers with resumable.
+	resumable []*ipc.Session
+	notices   []ipc.Notice
+	sockets   map[string]string
+	rev       uint64
+	ch        chan struct{}
 }
 
 func (b *otherDaemon) State(context.Context) (hostapi.State, error) {
@@ -115,7 +117,7 @@ func (b *otherDaemon) HostSocket(id string) string {
 }
 
 func (b *otherDaemon) Harnesses() ipc.Harnesses {
-	return ipc.Harnesses{Harnesses: []ipc.Harness{}, Terminal: true}
+	return ipc.Harnesses{Harnesses: []ipc.Harness{{ID: "hw", Name: "Work", Kind: core.HarnessClaude, Installed: true}}, Terminal: true}
 }
 
 func (b *otherDaemon) Config() ipc.ConfigState { return ipc.ConfigOf(b.file) }
@@ -150,6 +152,25 @@ func (b *otherDaemon) Call(ctx context.Context, op string, data json.RawMessage)
 		return json.Marshal(ipc.SessionOf(s))
 	case ipc.OpResume:
 		return json.Marshal(map[string]string{"op": op})
+	case ipc.OpSessionList:
+		var req ipc.SessionListRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			return nil, err
+		}
+		page := ipc.SessionPage{Items: []*ipc.Session{}}
+		if req.Filter.Resumable {
+			b.mu.Lock()
+			for _, x := range b.resumable {
+				if !req.Filter.Match(x.Core()) {
+					continue
+				}
+				c := *x
+				c.Capabilities = slices.Clone(x.Capabilities)
+				page.Items = append(page.Items, &c)
+			}
+			b.mu.Unlock()
+		}
+		return json.Marshal(page)
 	case ipc.OpInboxAnswer:
 		var a ipc.InboxAnswer
 		if err := json.Unmarshal(data, &a); err != nil {

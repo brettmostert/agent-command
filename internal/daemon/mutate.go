@@ -26,6 +26,7 @@ func (d *Daemon) snapshot(ctx context.Context, clientID string) (ipc.Snapshot, e
 		return ipc.Snapshot{}, err
 	}
 	d.showBackground(sessions)
+	d.nameHarnesses(ctx, sessions...)
 	groups, err := d.store.Groups(ctx, true)
 	if err != nil {
 		return ipc.Snapshot{}, err

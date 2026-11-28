@@ -54,7 +54,7 @@ func entitiesOf(s ipc.Snapshot) ([]entity, error) {
 			return
 		}
 		var b []byte
-		if b, err = json.Marshal(onTheWire(v)); err == nil {
+		if b, err = json.Marshal(wireOf(v)); err == nil {
 			out = append(out, entity{entityKey{typ, host, id}, b})
 		}
 	}

@@ -125,6 +125,9 @@ type RemoteNewRequest struct {
 	Prompt      string   `json:"prompt,omitempty"`
 	Args        []string `json:"args,omitempty"`
 	GroupID     string   `json:"group_id,omitempty"`
+	// Resume continues one of the host's agent sessions instead, as
+	// NewRequest.Resume: by its agent session id, in its folder there.
+	Resume string `json:"resume,omitempty"`
 	// SetWith puts it in a set with a session added from the same host, as
 	// NewRequest.SetWith.
 	SetWith string `json:"set_with,omitempty"`

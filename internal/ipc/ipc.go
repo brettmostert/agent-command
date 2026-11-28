@@ -42,13 +42,13 @@ const (
 	OpWatch    = "watch"    // wait for a change (WatchRequest → WatchResponse); a view's heartbeat
 	OpNew      = "new"      // start a session (NewRequest → *core.Session)
 	OpResume   = "resume"   // resume a paused session (Mutation, one target → *core.Session)
-	// OpConversations lists earlier Claude and Antigravity conversations to
-	// resume (Page → ConversationPage).
-	OpConversations = "conversations"
-	OpLayout        = "layout"       // the app's pane layout (→ Layout)
-	OpSetLayout     = "layout.set"   // stores it (Layout)
-	OpInbox         = "inbox"        // inbox items, newest first (InboxRequest → InboxPage)
-	OpInboxAnswer   = "inbox.answer" // types an answer into the item's session (InboxAnswer)
+	// OpSessionList lists sessions, here and on the known hosts, narrowed by
+	// a filter (SessionListRequest → SessionPage).
+	OpSessionList = "session.list"
+	OpLayout      = "layout"       // the app's pane layout (→ Layout)
+	OpSetLayout   = "layout.set"   // stores it (Layout)
+	OpInbox       = "inbox"        // inbox items, newest first (InboxRequest → InboxPage)
+	OpInboxAnswer = "inbox.answer" // types an answer into the item's session (InboxAnswer)
 	// Scheduled jobs. The snapshot lists them; these change them.
 	OpJobSave        = "job.save"         // adds or edits a job (core.Job: ID "" adds) → *core.Job
 	OpJobCheck       = "job.check"        // checks a job without saving it (JobCheckRequest) → JobCheck
@@ -439,9 +439,10 @@ type NewRequest struct {
 	// harness (Harnesses.Default for none).
 	HarnessID   string `json:"harness_id,omitempty"`
 	HarnessKind string `json:"harness_kind,omitempty"`
-	// Resume continues this conversation, by its id or an id prefix, in its
-	// harness (Conversation.HarnessID). Its folder comes from the
-	// conversation, so Cwd can be empty.
+	// Resume continues an agent's session, by its agent session id
+	// (Session.ClaudeSessionID) or a prefix of it, in its harness. Its folder
+	// comes from the agent's record, so Cwd can be empty. One acmd already
+	// has is that session, resumed, not a second one.
 	Resume      string   `json:"resume,omitempty"`
 	Name        string   `json:"name,omitempty"`
 	Description string   `json:"description,omitempty"`
@@ -466,25 +467,6 @@ type Layout struct {
 	// is the one layout from before clients had ids.
 	ClientID string `json:"client_id,omitempty"`
 	JSON     string `json:"json"`
-}
-
-// Conversation is an earlier Claude or Antigravity conversation that can be
-// resumed.
-type Conversation struct {
-	ID string `json:"id"`
-	// HarnessID is the harness whose history it's in, and HarnessKind its
-	// kind. NewRequest takes them with the id to resume it.
-	HarnessID   string    `json:"harness_id,omitempty"`
-	HarnessKind string    `json:"harness_kind"`
-	Cwd         string    `json:"cwd"`
-	Title       string    `json:"title,omitempty"`
-	Branch      string    `json:"branch,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitzero"`
-	// Running: Claude reports it as live, possibly in another terminal (agy
-	// reports none).
-	Running bool `json:"running,omitempty"`
-	// SessionID is the hosted acmd session that already has it ("" = none).
-	SessionID string `json:"session_id,omitempty"`
 }
 
 // Request is one client message.

@@ -230,7 +230,9 @@ func newResumeCmd() *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
 		Use:   "resume <id> | --all",
-		Short: "Resume stopped sessions",
+		Short: "Resume stopped sessions, or an agent's own session by its agent id",
+		Long: "Resumes a stopped session by its id. An id that isn't an acmd session's is an agent's own\n" +
+			"session id (acmd list --resumable shows them): it's resumed where it is, here or on a host.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all == (len(args) == 1) || len(args) > 1 {
 				return errors.New("give one session, or --all")
@@ -245,6 +247,9 @@ func newResumeCmd() *cobra.Command {
 					}
 				} else {
 					s, err := resolveSession(snap, args[0])
+					if errors.Is(err, core.ErrNoMatch) { // an agent's own session acmd doesn't have
+						return resumeAgentSession(cmd, c, args[0], err)
+					}
 					if err != nil {
 						return err
 					}
@@ -273,6 +278,46 @@ func newResumeCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "resume every paused session")
 	return cmd
+}
+
+// resumeAgentSession resumes one of an agent's own sessions by its agent id
+// (or 8 characters of it or more), wherever session.list finds it: here, or
+// on a host, which runs it. notFound is what to say when nothing has it.
+func resumeAgentSession(cmd *cobra.Command, c *client, id string, notFound error) error {
+	id = strings.ToLower(strings.TrimSpace(id))
+	rows, _, err := resumableSessions(c, ipc.SessionFilter{Archived: true})
+	if err != nil {
+		return err
+	}
+	var found []*ipc.Session
+	for _, r := range rows {
+		if r.ClaudeSessionID == id || len(id) >= 8 && strings.HasPrefix(r.ClaudeSessionID, id) {
+			found = append(found, r)
+		}
+	}
+	switch {
+	case len(found) == 0:
+		return notFound
+	case len(found) > 1:
+		return &ExitError{Code: exitInvalid, Err: fmt.Errorf("%d sessions' agent ids start with %s: give more of it", len(found), id)}
+	}
+	r := found[0]
+	var w ipc.Session
+	if r.Host != "" {
+		err = c.call(ipc.OpRemoteNew, ipc.RemoteNewRequest{Host: r.Host, HarnessID: r.HarnessID, HarnessKind: r.HarnessKind, Resume: r.ClaudeSessionID}, &w)
+	} else {
+		err = c.call(ipc.OpNew, ipc.NewRequest{HarnessID: r.HarnessID, HarnessKind: r.HarnessKind, Resume: r.ClaudeSessionID}, &w)
+	}
+	if err != nil {
+		return err
+	}
+	s := w.Core()
+	if s.Host != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Resumed %s (%s) on %s.\n", nameOf(s), s.Ref(), s.Host)
+		return nil
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Resumed %s (%s).\n", nameOf(s), s.Ref())
+	return nil
 }
 
 func newOpenCmd() *cobra.Command {

@@ -26,7 +26,7 @@ func sampleSnapshot() Snapshot {
 	sessions := []*core.Session{
 		{ID: "s1", Name: "api", Description: "fix the login bug", GroupID: "g1", NameSource: core.NameAuto, Cwd: "/w/api",
 			ClaudeSessionID: "c-1", Status: core.StatusWaiting, StatusDetail: "Allow Bash?", Unseen: true, Kind: core.KindHosted,
-			HarnessKind: core.HarnessClaude, HarnessID: "h-work", Pid: 4242, Remote: true, CreatedAt: at, LastEventAt: at.Add(time.Minute), StatusSince: at.Add(time.Minute)},
+			HarnessKind: core.HarnessClaude, HarnessID: "h-work", HarnessName: "Work", Pid: 4242, Remote: true, CreatedAt: at, LastEventAt: at.Add(time.Minute), StatusSince: at.Add(time.Minute)},
 		{ID: "s2", Name: "docs", GroupID: "g1", Cwd: "/w/docs", Status: core.StatusBusy, Kind: core.KindHosted, HarnessKind: core.HarnessClaude, HarnessID: "h-gone",
 			SetID: "set1", SetOrder: 2, CreatedAt: at},
 		{ID: "s3", Name: "shell", Cwd: "/w", Status: core.StatusDone, Kind: core.KindHosted, HarnessKind: core.HarnessTerminal,
@@ -46,7 +46,7 @@ func sampleSnapshot() Snapshot {
 	// session that names only its parent. Every client draws s5 in g1.
 	folder := json.RawMessage(`{"type":"folder","id":"f1","parent":"g1","name":"api","path":"/w/api"}`)
 	inFolder := &Session{Type: EntitySession, ID: "s5", Name: "lint", Parent: "f1", Cwd: "/w/api", Status: core.StatusDone,
-		Kind: core.KindHosted, HarnessKind: core.HarnessTerminal, CreatedAt: at}
+		Kind: core.KindHosted, HarnessKind: core.HarnessTerminal, HarnessName: "Terminal", CreatedAt: at}
 	return Snapshot{
 		Sessions: append(SessionsOf(sessions), inFolder),
 		Groups:   GroupsOf(groups),

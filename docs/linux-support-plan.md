@@ -83,13 +83,13 @@ The Go Linux UI imports `internal/ipc`, `internal/catalog`, and `internal/core` 
 - **Client identity & notice routing:** Send `ipc.ClientHello` (`id`, `kind: "linux"`, `device`, `caps: ["notify", "attach"]`, `on_host: true`), report `client.presence` (`active`/`idle`/`background`, `focus`) and `client.profile`, and show OS notifications (`GNotification`) when `Notice.To` targets this client.
 - **Event stream (`subscribe`):** Use `ipc.OpSubscribe` on a dedicated untimed stream connection (`snapshot`, then incremental `added` / `updated` / `removed` events with `rev`, plus `since` resume and `resync`) instead of polling `watch` + `snapshot`.
 - **Layout & entities:** Compute sidebar/list/group layout with `core.Layout` from `Snapshot` entities (`sessions`, `groups`, `sets`, `others` for unknown entity types, `harnesses`, `view_state`), using `{host, id}` `Target`s for Remote sessions.
-- **Connection pool & timeouts:** Match the macOS client (`app/Sources/AgentCommand/Daemon.swift`): keep a pool of request connections with a 30s call timeout (above the daemon's 15s Remote host wait), send `request_id` on retryable creating ops (`session.new`, `group.create`, `job.save`, `job.run`), and use cursor pagination (`inbox`, `job.runs`, `conversations`).
+- **Connection pool & timeouts:** Match the macOS client (`app/Sources/AgentCommand/Daemon.swift`): keep a pool of request connections with a 30s call timeout (above the daemon's 15s Remote host wait), send `request_id` on retryable creating ops (`session.new`, `group.create`, `job.save`, `job.run`), and use cursor pagination (`inbox`, `job.runs`, `session.list`).
 - **Daemon-owned ops:** Use `config.get`/`config.set`, `folders.*`, `doctor`, `init`, `report.details`/`report.page`, `editor.open`, `keys.set`, `layout`/`layout.set`, and `session.screen`.
 
 ### 3.3 Delivery Scope
 1. **Trial (3 days):** Go + GTK4/libadwaita + VTE spike on Debian stable and Arch.
 2. **First release (Required):** Window, sidebar, VTE panes and splits, pane sets, keymap (`Ctrl+Shift` / `Alt`), status bar, Ghostty color themes, `GNotification` notifications.
-3. **Parity (Recommended):** Inbox, scheduled jobs, settings, command popup, shortcuts editor, resume conversations, bug report, Remote hosts UI.
+3. **Parity (Recommended):** Inbox, scheduled jobs, settings, command popup, shortcuts editor, the Resume window (session.list with resumable), bug report, Remote hosts UI.
 4. **Desktop-dependent (Optional):** Reply popup (layer shell on KDE/Sway/Hyprland; normal window / notification actions on GNOME Wayland), `StatusNotifierItem` tray icon, `GlobalShortcuts` portal.
 
 ---

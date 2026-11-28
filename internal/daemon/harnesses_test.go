@@ -188,24 +188,24 @@ func TestHarnessFoldersHistoryAndAgents(t *testing.T) {
 	must(t, c.Call(ipc.OpHarnessAdd, ipc.HarnessSave{Kind: core.HarnessClaude, Name: "Work"}, &work1))
 	must(t, c.Call(ipc.OpHarnessAdd, ipc.HarnessSave{Kind: core.HarnessClaude, Name: "Same", ConfigDir: strp("~/.claude-work")}, nil))
 
-	list := conversationsOf(t, c)
-	byHarness := map[string]string{}
+	list := resumableOf(t, c)
+	byHarness, names := map[string]string{}, map[string]string{}
 	for _, x := range list {
-		byHarness[x.Title] = x.HarnessID
-		if !x.Running {
-			t.Errorf("%s isn't running: each folder's agents are listed", x.Title)
+		byHarness[x.Name], names[x.Name] = x.HarnessID, x.HarnessName
+		if !x.AgentLive {
+			t.Errorf("%s isn't live: each folder's agents are listed", x.Name)
 		}
 	}
 	claude := harnessesOf(t, c).Harnesses[0].ID
-	if len(list) != 2 || byHarness["standard"] != claude || byHarness["work"] != work1.ID {
-		t.Errorf("conversations = %+v", list)
+	if len(list) != 2 || byHarness["standard"] != claude || byHarness["work"] != work1.ID || names["work"] != "Work" {
+		t.Errorf("resumable = %+v", list)
 	}
 	s := newSess(t, c, ipc.NewRequest{HarnessID: work1.ID, Resume: "22222222"})
 	if s.HarnessID != work1.ID || s.Cwd != "/w/work" {
 		t.Errorf("resumed in its harness: %+v", s)
 	}
 	if err := c.Call(ipc.OpNew, ipc.NewRequest{Resume: "22222222"}, nil); err == nil {
-		t.Error("the standard folder's history has no work conversation")
+		t.Error("the standard folder's history has no work session")
 	}
 }
 

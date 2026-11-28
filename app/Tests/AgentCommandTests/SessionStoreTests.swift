@@ -362,7 +362,8 @@ extension UsesSharedSpeech {
             defer { daemon.stop() }
             daemon.reply("resume", hosted("a"))
             daemon.reply("new", hosted("n"))
-            daemon.reply("conversations", ["items": [["id": "c1", "cwd": "/w", "updated_at": "2026-11-07T10:00:00Z"]], "next_cursor": ""] as [String: Any])
+            daemon.reply("session.list", ["items": [["id": "", "claude_session_id": "c1", "cwd": "/w", "last_event_at": "2026-11-07T10:00:00Z"]],
+                                          "next_cursor": "", "unreached": ["mini"]] as [String: Any])
             let s = try store(["a"])
 
             var resumed = false
@@ -373,10 +374,13 @@ extension UsesSharedSpeech {
             s.saveLayout("{}")
             try await until { daemon.received("layout.set").first?["json"] as? String == "{}" }
 
-            var conversations: [Conversation]?
-            s.loadConversations { list, _ in conversations = list }
-            try await until { conversations != nil }
-            #expect(conversations?.map(\.id) == ["c1"])
+            var resumable: [Session]?
+            var unreached: [String] = []
+            s.loadResumable { list, missed, _ in (resumable, unreached) = (list, missed) }
+            try await until { resumable != nil }
+            #expect(resumable?.map(\.claudeSessionID) == ["c1"] && unreached == ["mini"])
+            let filter = daemon.received("session.list").first?["filter"] as? [String: Any]
+            #expect(filter?["resumable"] as? Bool == true && filter?["archived"] as? Bool == true)
 
             s.archive("a")
             s.unarchive("a")
@@ -389,15 +393,24 @@ extension UsesSharedSpeech {
             #expect(new["cwd"] as? String == "/work" && new["harness_kind"] as? String == "terminal" && new["harness_id"] as? String == "")
 
             daemon.reply("new", hosted("r"))
-            s.resumeConversation("conv-1", harness: .antigravity)
+            s.resume(ResumeTarget(agentID: "conv-1", harnessID: "h-agy", harnessKind: "antigravity"))
             try await until { s.selectedID == "r" }
             let request = try #require(daemon.received("new").last)
-            #expect(request["resume"] as? String == "conv-1" && request["harness_kind"] as? String == "antigravity")
-            #expect(request["cwd"] as? String == "", "the folder comes from the conversation")
-            daemon.reply("new", hosted("q"))
-            s.resumeConversation("sess-2")
+            #expect(request["resume"] as? String == "conv-1" && request["harness_kind"] as? String == "antigravity" &&
+                    request["harness_id"] as? String == "h-agy")
+            #expect(request["cwd"] as? String == "", "the folder comes from the agent's record")
+            // On a host: there, by its agent id.
+            daemon.reply("remote.new", hosted("q"))
+            s.resume(ResumeTarget(agentID: "sess-2", host: "studio", harnessID: "theirs"))
             try await until { s.selectedID == "q" }
-            #expect(daemon.received("new").last?["harness_kind"] as? String == "claude", "Claude's by default")
+            let remote = try #require(daemon.received("remote.new").last)
+            #expect(remote["host"] as? String == "studio" && remote["resume"] as? String == "sess-2" && remote["harness_id"] as? String == "theirs")
+            // A stopped one as itself, on its host.
+            daemon.reply("resume", hosted("p"))
+            s.resume(ResumeTarget(sessionID: "p", agentID: "x", host: "studio", byID: true))
+            try await until { s.selectedID == "p" }
+            let byID = try #require(daemon.received("resume").last)
+            #expect((byID["targets"] as? [[String: Any]])?.first?["host"] as? String == "studio")
         }
 
         @Test func aNewSessionCanBePlacedInstead() async throws {
@@ -415,10 +428,10 @@ extension UsesSharedSpeech {
         @Test func aFailedListSaysWhy() async throws {
             let daemon = try FakeDaemon()
             defer { daemon.stop() }
-            daemon.fail("conversations", "can't read them")
+            daemon.fail("session.list", "can't read them")
             let s = try store(["a"])
             var message: String?
-            s.loadConversations { _, error in message = error }
+            s.loadResumable { _, _, error in message = error }
             try await until { message != nil }
             #expect(message == "can't read them")
         }

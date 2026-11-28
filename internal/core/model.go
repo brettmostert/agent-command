@@ -100,7 +100,10 @@ type Session struct {
 	// HarnessID is the harness it runs in ("" for a terminal, and for a
 	// session its hooks found before it's matched to one).
 	HarnessID string
-	Pid       int
+	// HarnessName is that harness's name. The daemon fills it in as it
+	// sends a session; it isn't stored, as a harness can be renamed.
+	HarnessName string
+	Pid         int
 	// Remote: clients of this acmd's Hosting may see and use it (Remote sessions).
 	Remote bool
 	// Host is the Remote host a session added from one runs on ("" for a

@@ -27,11 +27,11 @@ func withOwnHosts(ops []Op) []Op {
 
 // sessionOps need this machine to run sessions, or what goes with them:
 // starting one here, hooks, jobs and the folders they start in, the
-// conversations to resume, harnesses' hooks, Hosting, waking, speech and the
+// harnesses' hooks, Hosting, waking, speech and the
 // editor. A client-only daemon (Windows) answers not_supported for them. Ops
 // on sessions already here (rename, attach, the Inbox) aren't listed: on a
 // client-only daemon the only sessions are a host's.
-var sessionOps = []string{ipc.OpEvent, ipc.OpNew, ipc.OpConversations,
+var sessionOps = []string{ipc.OpEvent, ipc.OpNew,
 	ipc.OpJobSave, ipc.OpJobCheck, ipc.OpJobPromptRead, ipc.OpJobPromptWrite, ipc.OpJobDelete, ipc.OpJobPause,
 	ipc.OpJobRun, ipc.OpJobRuns, ipc.OpHarnessSettings, ipc.OpWakeSet,
 	ipc.OpFoldersRecent, ipc.OpFoldersList, ipc.OpFoldersMkdir,
@@ -115,7 +115,7 @@ func localOps() []Op {
 		// Sessions.
 		act(ipc.OpNew, "Starts a session in the background, in a folder, with a harness.", entities, ipc.NewRequest{}, ipc.Session{}).runsCode().retryable(),
 		act(ipc.OpResume, "Resumes a paused session.", entities, ipc.Mutation{}, ipc.Session{}).runsCode(),
-		read(ipc.OpConversations, "Lists earlier Claude and Antigravity conversations that can be resumed.", host, ipc.Page{}, ipc.ConversationPage{}),
+		read(ipc.OpSessionList, "Lists sessions, here and on the known hosts, the most recently active first, narrowed by a filter: where, resumable, harness, group, status, archived. Resumable adds the agents' own sessions acmd doesn't have, with no acmd id. A host that doesn't answer is named as unreached.", entities, ipc.SessionListRequest{}, ipc.SessionPage{}),
 		// rename, archive, unarchive, move, purge, remote and remove_added take
 		// many ids (IDs), and return a result for each.
 		mut(act(ipc.MutRename, "Renames sessions: the name for one, numbered (\"api - 1\", \"api - 2\") for several.", entities, nil, ipc.Results{})),
@@ -197,7 +197,7 @@ func localOps() []Op {
 		admin(ipc.OpRemoteHostRemove, "Forgets a known host, and the sessions added from it here.", host, ipc.RemoteHostRef{}, nil).destructive(),
 		act(ipc.OpRemoteHostRetry, "Connects to a known host now, without waiting out the backoff.", host, ipc.RemoteHostRef{}, ipc.RemoteHost{}),
 		read(ipc.OpRemoteBrowse, "Connects to a host and lists its own sessions, as it has them now.", host, ipc.RemoteHostRef{}, ipc.RemoteBrowse{}),
-		act(ipc.OpRemoteNew, "Starts a session on a host, in its folder and group there: it shows in the host's tree.", host, ipc.RemoteNewRequest{}, ipc.Session{}).runsCode().retryable(),
+		act(ipc.OpRemoteNew, "Starts a session on a host, in its folder and group there, or resumes one of its agent sessions: it shows in the host's tree.", host, ipc.RemoteNewRequest{}, ipc.Session{}).runsCode().retryable(),
 		read(ipc.OpRemoteFoldersRecent, "Lists a host's recent folders.", host, ipc.RemoteHostRef{}, api.FolderList{}),
 		read(ipc.OpRemoteFoldersList, "Lists a folder on a host.", host, ipc.RemoteFolderRequest{}, api.FolderList{}),
 		act(ipc.OpRemoteFoldersMkdir, "Makes a folder on a host.", host, ipc.RemoteFolderRequest{}, api.Folder{}),
