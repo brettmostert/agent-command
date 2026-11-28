@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.101.0](https://github.com/brettmostert/agent-command/compare/v0.100.0...v0.101.0) (2026-11-28)
+
+
+### Features
+
+* disconnect a Remote host without removing it, and connect it again ([#226](https://github.com/brettmostert/agent-command/issues/226)) ([ba6708a](https://github.com/brettmostert/agent-command/commit/ba6708a5c108272ac3f5984c7609eb88e671e01e))
+
 ## [0.100.0](https://github.com/brettmostert/agent-command/compare/v0.99.0...v0.100.0) (2026-11-28)
 
 
