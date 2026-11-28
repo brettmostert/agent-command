@@ -120,6 +120,9 @@ pub const Session = struct {
     /// claude, antigravity or terminal, and the harness it runs in ("" for a terminal).
     harness_kind: []const u8 = "",
     harness_id: []const u8 = "",
+    /// Its harness's name, as its own machine has it ("Work"), or its
+    /// kind's ("Claude", "Terminal") when that harness is gone.
+    harness_name: []const u8 = "",
     pid: i32 = 0,
     host: []const u8 = "",
     created_at: []const u8 = "",
@@ -161,19 +164,6 @@ pub const Snapshot = struct {
     /// know (design 7.2): kept for their children's sake.
     others: ?[]const EntityRef = null,
     harnesses: ?[]const Harness = null,
-
-    /// What a session runs in, as a name: its harness's, its kind's when that
-    /// was removed (or it's a host's), or "Terminal".
-    pub fn harnessName(self: Snapshot, s: Session) []const u8 {
-        if (s.host.len == 0 and s.harness_id.len > 0) {
-            for (self.harnesses orelse &.{}) |h| {
-                if (std.mem.eql(u8, h.id, s.harness_id)) return h.name;
-            }
-        }
-        if (std.mem.eql(u8, s.harness_kind, "terminal")) return "Terminal";
-        if (std.mem.eql(u8, s.harness_kind, "antigravity")) return "Antigravity";
-        return "Claude";
-    }
 
     /// The group a session shows in (design 7.2): the one it names, else its
     /// nearest ancestor that's a group, following parents through sets and
@@ -842,11 +832,12 @@ test "decodes the daemon's snapshot fixture" {
     try std.testing.expectEqualStrings("studio", sessions[3].host);
     try std.testing.expectEqualStrings("2026-11-20T09:00:00Z", sessions[0].created_at);
     try std.testing.expectEqualStrings("", sessions[0].archived_at);
-    // Each session's harness: its name; a removed one's kind; a terminal.
+    // Each session's harness, as the daemon names it: its name; a removed
+    // one's kind; a terminal.
     try std.testing.expectEqual(@as(usize, 3), snap.value.harnesses.?.len);
-    try std.testing.expectEqualStrings("Work", snap.value.harnessName(sessions[0]));
-    try std.testing.expectEqualStrings("Claude", snap.value.harnessName(sessions[1]));
-    try std.testing.expectEqualStrings("Terminal", snap.value.harnessName(sessions[2]));
+    try std.testing.expectEqualStrings("Work", sessions[0].harness_name);
+    try std.testing.expectEqualStrings("Claude", sessions[1].harness_name);
+    try std.testing.expectEqualStrings("Terminal", sessions[2].harness_name);
     try std.testing.expect(!snap.value.harnesses.?[2].installed);
 
     const groups = snap.value.groups.?;

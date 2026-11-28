@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -25,12 +27,25 @@ var listSorts = []string{"created", "name", "activity", "status", "cwd"}
 
 func newListCmd() *cobra.Command {
 	var vs core.ViewState
-	var group, status string
+	var lf listFilters
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List the sessions the app runs, with their ids",
 		Long: "Lists the sessions, this machine's and your Remote hosts', with the id commands take. How it's\n" +
-			"laid out is the command's own: the flags, each time. The daemon keeps no view.",
+			"laid out is the command's own: the flags, each time. The daemon keeps no view.\n\n" +
+			"Each filter is a flag, or --filter key=value; --filter with no key is a text search. Different\n" +
+			"filters must all match, and one given more than once matches any of its values. The keys:\n" +
+			"  on         local, remote (any Remote host), or a host's name\n" +
+			"  resumable  true: what can be resumed, here and on the hosts, with the agents' own sessions\n" +
+			"             acmd doesn't have (no acmd id: acmd resume <agent id> resumes one)\n" +
+			"  harness    a harness's name, e.g. Work or Terminal\n" +
+			"  group      a group's id\n" +
+			"  status     a status, e.g. busy or waiting\n" +
+			"  archived   true: include archived sessions\n" +
+			"  text       text in the name, description, folder or group (g:<text> for the group only)",
+		Example: "  acmd list --on studio --resumable --harness Work\n" +
+			"  acmd list --filter on=studio --filter resumable=true --filter harness=Work   # the same\n" +
+			"  acmd list --filter api --on remote",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if vs.Mode != "groups" && vs.Mode != "list" {
@@ -39,16 +54,34 @@ func newListCmd() *cobra.Command {
 			if !slices.Contains(listSorts, vs.Sort) {
 				return usageError{fmt.Errorf("--sort is %s, not %q", strings.Join(listSorts, ", "), vs.Sort)}
 			}
-			return withClient(cmd.Context(), func(_ *client, snap snapshot) error {
-				var wantGroup *core.Group
-				if group != "" {
-					g, err := resolveGroupAnywhere(snap, group)
+			f, text, err := lf.parse()
+			if err != nil {
+				return usageError{err}
+			}
+			vs.ShowArchived = f.Archived
+			vs.Filter = text
+			return withClient(cmd.Context(), func(c *client, snap snapshot) error {
+				var groups []*core.Group
+				for _, id := range f.Group {
+					g, err := resolveGroupAnywhere(snap, id)
 					if err != nil {
 						return err
 					}
-					wantGroup = g
+					groups = append(groups, g)
 				}
-				rows := filterRows(listRows(snap, vs), wantGroup, status)
+				f.Group = nil // matched by host and id below
+				if f.Resumable {
+					return listResumable(cmd, c, f, groups, text)
+				}
+				if err := knownHosts(snap, f.On); err != nil {
+					return err
+				}
+				var rows []listRow
+				for _, r := range listRows(snap, vs) {
+					if f.Match(r.Session) && inGroups(r.Session, groups) {
+						rows = append(rows, r)
+					}
+				}
 				if jsonOut {
 					return writeListJSON(jsonWriter(cmd), snap, rows)
 				}
@@ -56,15 +89,144 @@ func newListCmd() *cobra.Command {
 			})
 		},
 	}
-	f := cmd.Flags()
-	f.StringVar(&vs.Mode, "mode", "groups", "groups, or list: one list, not in groups")
-	f.StringVar(&vs.Sort, "sort", "created", strings.Join(listSorts, ", "))
-	f.BoolVar(&vs.Desc, "desc", false, "sort descending")
-	f.BoolVar(&vs.ShowArchived, "archived", false, "include archived sessions and groups")
-	f.StringVar(&vs.Filter, "filter", "", "only sessions with this text in them (g:<group name> matches a group's)")
-	f.StringVar(&group, "group", "", "only sessions in this group, by id")
-	f.StringVar(&status, "status", "", "only these statuses (comma-separated, e.g. busy,waiting)")
+	fl := cmd.Flags()
+	fl.StringVar(&vs.Mode, "mode", "groups", "groups, or list: one list, not in groups")
+	fl.StringVar(&vs.Sort, "sort", "created", strings.Join(listSorts, ", "))
+	fl.BoolVar(&vs.Desc, "desc", false, "sort descending")
+	fl.StringArrayVar(&lf.filter, "filter", nil, "a filter as key=value, or text to search for (repeat it)")
+	fl.StringArrayVar(&lf.on, "on", nil, "only sessions here (local), on any Remote host (remote), or on this host")
+	fl.BoolVar(&lf.resumable, "resumable", false, "what can be resumed, with the agents' own sessions acmd doesn't have")
+	fl.StringArrayVar(&lf.harness, "harness", nil, "only sessions in this harness, by name")
+	fl.StringArrayVar(&lf.group, "group", nil, "only sessions in this group, by id")
+	fl.StringArrayVar(&lf.status, "status", nil, "only these statuses (comma-separated, e.g. busy,waiting)")
+	fl.BoolVar(&lf.archived, "archived", false, "include archived sessions and groups")
 	return cmd
+}
+
+// listFilters are acmd list's filters as given: each flag, and --filter's
+// key=value form of the same.
+type listFilters struct {
+	filter, on, harness, group, status []string
+	resumable, archived                bool
+}
+
+// parse is the filters as session.list takes them, and the text to search
+// for. A --filter whose key isn't one of the filters is text.
+func (lf listFilters) parse() (ipc.SessionFilter, string, error) {
+	f := ipc.SessionFilter{On: lf.on, Resumable: lf.resumable, Harness: lf.harness, Group: lf.group, Archived: lf.archived}
+	add := func(list *[]string, v string) {
+		for _, x := range strings.Split(v, ",") {
+			if x = strings.TrimSpace(x); x != "" {
+				*list = append(*list, x)
+			}
+		}
+	}
+	for _, v := range lf.status {
+		add(&f.Status, v)
+	}
+	var text []string
+	for _, v := range lf.filter {
+		key, value, _ := strings.Cut(v, "=")
+		switch key {
+		case "on":
+			f.On = append(f.On, value)
+		case "harness":
+			f.Harness = append(f.Harness, value)
+		case "group":
+			f.Group = append(f.Group, value)
+		case "status":
+			add(&f.Status, value)
+		case "text":
+			text = append(text, value)
+		case "resumable", "archived":
+			on, err := strconv.ParseBool(value)
+			if err != nil {
+				return f, "", fmt.Errorf("--filter %s is true or false, not %q", key, value)
+			}
+			if key == "resumable" {
+				f.Resumable = f.Resumable || on
+			} else {
+				f.Archived = f.Archived || on
+			}
+		default:
+			text = append(text, v)
+		}
+	}
+	return f, strings.Join(text, " "), nil
+}
+
+// knownHosts checks that each host on names is a known host.
+func knownHosts(snap snapshot, on []string) error {
+	for _, name := range on {
+		if name == ipc.OnLocal || name == ipc.OnRemote {
+			continue
+		}
+		if !slices.ContainsFunc(snap.RemoteHosts, func(h ipc.RemoteHost) bool { return h.Name == name }) {
+			return &ExitError{Code: exitNotFound, Err: fmt.Errorf("there's no Remote host named %q (acmd remote list shows them)", name)}
+		}
+	}
+	return nil
+}
+
+func inGroups(s *core.Session, groups []*core.Group) bool {
+	return len(groups) == 0 || slices.ContainsFunc(groups, func(g *core.Group) bool { return s.GroupID == g.ID && s.Host == g.Host })
+}
+
+// listResumable is list --resumable: what session.list says can be resumed,
+// here and on the hosts, the most recently active first.
+func listResumable(cmd *cobra.Command, c *client, f ipc.SessionFilter, groups []*core.Group, text string) error {
+	rows, unreached, err := resumableSessions(c, f)
+	if err != nil {
+		return err
+	}
+	terms := strings.Fields(strings.ToLower(text))
+	rows = slices.DeleteFunc(rows, func(s *ipc.Session) bool {
+		hay := strings.ToLower(strings.Join([]string{s.Name, s.ID, s.ClaudeSessionID, s.Cwd}, "\x00"))
+		return !inGroups(s.Core(), groups) || slices.ContainsFunc(terms, func(t string) bool { return !strings.Contains(hay, t) })
+	})
+	for _, host := range unreached {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s didn't answer: its sessions aren't listed.\n", host)
+	}
+	if jsonOut {
+		enc := json.NewEncoder(jsonWriter(cmd))
+		enc.SetIndent("", "  ")
+		return enc.Encode(rows)
+	}
+	w := cmd.OutOrStdout()
+	if len(rows) == 0 {
+		_, err := fmt.Fprintln(w, "Nothing to resume.")
+		return err
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tAGENT ID\tSTATUS\tNAME\tHARNESS\tDIR\tWHERE\tLAST")
+	for _, w := range rows {
+		s := w.Core()
+		id, status := cmp.Or(s.ID, "-"), cmp.Or(string(s.Status), "-")
+		if w.AgentLive {
+			status += " (live)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", id, cmp.Or(s.ClaudeSessionID, "-"), status, display(s.Name, 40),
+			w.HarnessName, filepath.Base(s.Cwd), where(s), age(s))
+	}
+	return tw.Flush()
+}
+
+// resumableSessions is every page of session.list for f, with resumable.
+func resumableSessions(c *client, f ipc.SessionFilter) ([]*ipc.Session, []string, error) {
+	f.Resumable = true
+	req := ipc.SessionListRequest{Filter: f, Page: ipc.Page{Limit: ipc.PageMax}}
+	var rows []*ipc.Session
+	for {
+		var page ipc.SessionPage
+		if err := c.call(ipc.OpSessionList, req, &page); err != nil {
+			return nil, nil, err
+		}
+		rows = append(rows, page.Items...)
+		if page.NextCursor == "" || len(page.Items) == 0 {
+			return rows, page.Unreached, nil
+		}
+		req.Cursor = page.NextCursor
+	}
 }
 
 type listRow struct {
@@ -93,33 +255,13 @@ func resolveGroupAnywhere(snap snapshot, id string) (*core.Group, error) {
 	return resolveGroup(snap, id)
 }
 
-func filterRows(rows []listRow, wantGroup *core.Group, status string) []listRow {
-	statuses := map[string]bool{}
-	for _, s := range strings.Split(status, ",") {
-		if s = strings.TrimSpace(s); s != "" {
-			statuses[s] = true
-		}
-	}
-	var out []listRow
-	for _, r := range rows {
-		if wantGroup != nil && (r.Session.GroupID != wantGroup.ID || r.Session.Host != wantGroup.Host) {
-			continue
-		}
-		if len(statuses) > 0 && !statuses[string(r.Session.Status)] {
-			continue
-		}
-		out = append(out, r)
-	}
-	return out
-}
-
 func writeListTable(w io.Writer, rows []listRow) error {
 	if len(rows) == 0 {
 		_, err := fmt.Fprintln(w, "No sessions.")
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tGROUP\tNAME\tDIR\tWHERE\tLAST")
+	fmt.Fprintln(tw, "ID\tSTATUS\tGROUP\tNAME\tHARNESS\tDIR\tWHERE\tLAST")
 	for _, r := range rows {
 		status := string(r.Session.Status)
 		if r.Session.Unseen {
@@ -129,8 +271,8 @@ func writeListTable(w io.Writer, rows []listRow) error {
 		if r.Group != nil {
 			group = r.Group.Name
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Session.ID, status, group, display(r.Session.Name, 40),
-			filepath.Base(r.Session.Cwd), where(r.Session), age(r.Session))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Session.ID, status, group, display(r.Session.Name, 40),
+			harnessOf(r.Session), filepath.Base(r.Session.Cwd), where(r.Session), age(r.Session))
 	}
 	return tw.Flush()
 }
@@ -152,6 +294,9 @@ func writeListJSON(w io.Writer, snap snapshot, rows []listRow) error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
 }
+
+// harnessOf is the name of what a session runs in.
+func harnessOf(s *core.Session) string { return cmp.Or(s.HarnessName, core.KindTitle(s.HarnessKind)) }
 
 // where says where a session runs: "↗ <host>" on a Remote host, else "acmd".
 func where(s *core.Session) string {

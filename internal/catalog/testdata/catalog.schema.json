@@ -95,23 +95,6 @@
       }
     },
     {
-      "name": "conversations",
-      "description": "Lists earlier Claude and Antigravity conversations that can be resumed.",
-      "scope": "read",
-      "kind": "read",
-      "grant": "host",
-      "needs_sessions": true,
-      "transport": {
-        "op": "conversations"
-      },
-      "input": {
-        "$ref": "#/$defs/ipc.Page"
-      },
-      "output": {
-        "$ref": "#/$defs/ipc.ConversationPage"
-      }
-    },
-    {
       "name": "doctor",
       "description": "Returns the checks acmd doctor makes: acmd itself, the agents and their hooks, the editor, the background service.",
       "scope": "read",
@@ -1128,7 +1111,7 @@
     },
     {
       "name": "remote.new",
-      "description": "Starts a session on a host, in its folder and group there: it shows in the host's tree.",
+      "description": "Starts a session on a host, in its folder and group there, or resumes one of its agent sessions: it shows in the host's tree.",
       "scope": "act",
       "kind": "change",
       "grant": "host",
@@ -1344,6 +1327,22 @@
       },
       "input": {
         "$ref": "#/$defs/ipc.Mutation"
+      }
+    },
+    {
+      "name": "session.list",
+      "description": "Lists sessions, here and on the known hosts, the most recently active first, narrowed by a filter: where, resumable, harness, group, status, archived. Resumable adds the agents' own sessions acmd doesn't have, with no acmd id. A host that doesn't answer is named as unreached.",
+      "scope": "read",
+      "kind": "read",
+      "grant": "entities",
+      "transport": {
+        "op": "session.list"
+      },
+      "input": {
+        "$ref": "#/$defs/ipc.SessionListRequest"
+      },
+      "output": {
+        "$ref": "#/$defs/ipc.SessionPage"
       }
     },
     {
@@ -2312,63 +2311,6 @@
         "versions"
       ]
     },
-    "ipc.Conversation": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "harness_id": {
-          "type": "string"
-        },
-        "harness_kind": {
-          "type": "string"
-        },
-        "cwd": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string"
-        },
-        "updated_at": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "running": {
-          "type": "boolean"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "type": "object",
-      "required": [
-        "id",
-        "harness_kind",
-        "cwd",
-        "updated_at"
-      ]
-    },
-    "ipc.ConversationPage": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/$defs/ipc.Conversation"
-          },
-          "type": "array"
-        },
-        "next_cursor": {
-          "type": "string"
-        }
-      },
-      "type": "object",
-      "required": [
-        "items",
-        "next_cursor"
-      ]
-    },
     "ipc.DeviceFeatures": {
       "properties": {
         "speech": {
@@ -3260,17 +3202,6 @@
         "id"
       ]
     },
-    "ipc.Page": {
-      "properties": {
-        "limit": {
-          "type": "integer"
-        },
-        "cursor": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "ipc.PromptFile": {
       "properties": {
         "path": {
@@ -3639,6 +3570,9 @@
         "group_id": {
           "type": "string"
         },
+        "resume": {
+          "type": "string"
+        },
         "set_with": {
           "type": "string"
         }
@@ -3966,6 +3900,9 @@
         "harness_id": {
           "type": "string"
         },
+        "harness_name": {
+          "type": "string"
+        },
         "pid": {
           "type": "integer"
         },
@@ -4014,6 +3951,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "agent_live": {
+          "type": "boolean"
         }
       },
       "type": "object",
@@ -4025,10 +3968,87 @@
         "status",
         "kind",
         "harness_kind",
+        "harness_name",
         "created_at",
         "last_event_at",
         "status_since",
         "archived_at"
+      ]
+    },
+    "ipc.SessionFilter": {
+      "properties": {
+        "on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resumable": {
+          "type": "boolean"
+        },
+        "harness": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "group": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ipc.SessionListRequest": {
+      "properties": {
+        "filter": {
+          "$ref": "#/$defs/ipc.SessionFilter"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "cursor": {
+          "type": "string"
+        }
+      },
+      "type": "object",
+      "required": [
+        "filter"
+      ]
+    },
+    "ipc.SessionPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ipc.Session"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": "string"
+        },
+        "unreached": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
       ]
     },
     "ipc.Set": {

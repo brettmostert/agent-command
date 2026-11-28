@@ -963,43 +963,81 @@ final class SessionStore {
         } done: { _ in }
     }
 
-    /// Lists earlier agent conversations (Claude's and Antigravity's) that can be resumed. done gets an error
-    /// message when that fails.
-    func loadConversations(done: @escaping ([Conversation], String?) -> Void) {
-        queued("conversations", { conn -> [Conversation] in
-            var list: [Conversation] = []
+    /// Lists what can be resumed, here and on the Remote hosts: the stopped and
+    /// archived sessions, and the agents' own sessions acmd doesn't have. done gets
+    /// the hosts that didn't answer, and an error message when it failed.
+    func loadResumable(done: @escaping ([Session], [String], String?) -> Void) {
+        nonisolated struct Filter: Encodable {
+            let resumable = true
+            let archived = true
+        }
+        nonisolated struct Request: Encodable {
+            let filter = Filter()
+            let limit: Int
+            let cursor: String?
+        }
+        nonisolated struct ListPage: Decodable {
+            var items: [Session] = []
+            var next_cursor = ""
+            var unreached: [String]?
+        }
+        queued("session.list", { conn -> ([Session], [String]) in
+            var list: [Session] = []
+            var unreached: [String] = []
             var cursor = ""
-            repeat { // all of them, for the picker's search
-                let page: Page<Conversation> = try conn.call("conversations", PageRequest(limit: Page<Conversation>.max, cursor: cursor))
+            repeat { // all of them, for the window's search
+                let page: ListPage = try conn.call("session.list", Request(limit: Page<Session>.max, cursor: cursor.isEmpty ? nil : cursor))
                 list += page.items
-                cursor = page.items.isEmpty ? "" : page.nextCursor
+                unreached = page.unreached ?? unreached
+                cursor = page.items.isEmpty ? "" : page.next_cursor
             } while !cursor.isEmpty
-            return list
+            return (list, unreached)
         }) { result in
             switch result {
-            case .success(let list): done(list, nil)
-            case .failure(let error): done([], error.localizedDescription)
+            case .success(let (list, unreached)): done(list, unreached, nil)
+            case .failure(let error): done([], [], error.localizedDescription)
             }
         }
     }
 
-    /// Continues an earlier conversation of an agent's, by its id or an id prefix, and
-    /// selects it.
-    func resumeConversation(_ id: String, harness: Harness = .claude) {
+    /// Resumes what the Resume window picked, on the machine it's on, and selects it:
+    /// a stopped session as itself, anything else by its agent id (which brings an
+    /// archived one back, and makes an acmd session for one acmd didn't have).
+    func resume(_ target: ResumeTarget) {
+        nonisolated struct Resume: Encodable {
+            let kind = ""
+            let targets: [Target]
+        }
         nonisolated struct New: Encodable {
-            let cwd: String
+            let cwd = ""
             let harness_id: String
             let harness_kind: String
             let resume: String
         }
-        let (harnessID, kind) = harness.request
+        nonisolated struct RemoteNew: Encodable {
+            let host: String
+            let dir = ""
+            let harness_id: String
+            let harness_kind: String
+            let resume: String
+        }
         run(failure: "Couldn't resume the session") { conn in
-            let session: Session = try conn.call("new", New(cwd: "", harness_id: harnessID, harness_kind: kind, resume: id))
+            if target.byID {
+                let session: Session = try conn.call("resume", Resume(targets: [Target(host: target.host, id: target.sessionID)]))
+                return session
+            }
+            if target.host.isEmpty {
+                let session: Session = try conn.call("new", New(harness_id: target.harnessID, harness_kind: target.harnessKind, resume: target.agentID))
+                return session
+            }
+            let session: Session = try conn.call("remote.new", RemoteNew(host: target.host, harness_id: target.harnessID,
+                                                                         harness_kind: target.harnessKind, resume: target.agentID))
             return session
         } done: { session in
-            if !self.sessions.contains(session) { self.sessions.append(session) }
-            if self.selectedID == session.id {
-                self.onSelect?(session)
+            // A host's session comes in its tree; this Mac's is added now.
+            if target.host.isEmpty, !self.sessions.contains(session) { self.sessions.append(session) }
+            if self.selectedID == session.id, let shown = self.sessions.first(where: { $0.id == session.id }) {
+                self.onSelect?(shown)
             } else {
                 self.selectedID = session.id
             }

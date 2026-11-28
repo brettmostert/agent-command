@@ -20,7 +20,8 @@ A native macOS app for running Claude Code sessions and terminals side by side, 
 - **Read aloud:** a local voice ([Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) on MLX) reads messages in the popup, the Inbox and the agent view, with the speaker button or ⇧⌘S. Turn it on from the bell, which downloads the model (about 360 MB). The popup can read each message as it's shown. American English voices only for now.
 - **Dock icon:** shows how many messages are unread, and its right-click menu opens the Inbox. Clicking it brings up the popup if that's open, otherwise the main window.
 - **Notifications** when a session needs you, fails or finishes a long turn. Work Claude runs in the background counts too: when a 10-minute build it started in the background finishes, you hear about it, and until then its row says `done · background work`. Clicking one opens that session. After quitting with ⌘Q, they still appear, but a click can't open the session.
-- **Resume** an earlier Claude conversation by ID or from a list.
+- **Resume** a session from the palette's Resume session: the stopped and archived sessions here and on your Remote hosts, and Claude and Antigravity sessions acmd never ran (one from a plain terminal, or a purged one). **Where** at the top (All, Local, Remote or a host, as the sidebar has it; Tab moves through it) picks which machines to list. A search matches the name first, then the id, then the folder. A session resumes on the machine it's on. Paste an agent's session id to look it up.
+- **Harness names:** each session's harness ("Claude", "Work", "Terminal") shows under its status in the sidebar, and after its status over its pane. A host's session shows the host's name for its harness.
 - **Command popup** and a live **theme picker**, using Ghostty's themes.
 - **Agent Remote Control:** when it's on, every Claude and Antigravity session starts with `--remote-control`, so you can use it from claude.ai, the Claude app or Antigravity. Turn it on in Settings or with `acmd agent-remote-control on` (it was `acmd remote-control`, and the `remote_control` setting is now `agent_remote_control`).
 - **Remote sessions:** use the sessions that run on another Mac's Agent Command, or let another Mac use yours. See [Remote sessions](#remote-sessions) below.
@@ -37,7 +38,26 @@ Pair another Agent Command with this one, and it shows this Mac's sessions, grou
 
 ## Scripting with acmd
 
-Every command that reads or changes state takes `--json`, which prints the answer of the daemon op it runs, in the daemon's wire types (`internal/ipc`), and nothing else. A command that runs several ops prints one answer per line. `acmd events` follows the daemon as it changes: a snapshot, then each session, group, inbox item, job or setting added, updated or removed, one JSON event per line (`--types` to pick, `--since` to resume). Errors go to stderr as `{"error": {"code": "…", "message": "…"}}`. Commands take ids, never names or numbers in a list: `acmd list` shows each session's id, and `acmd find <name>` (or `acmd group find <name>`) prints the ids of those whose name has it. How `acmd list` lays sessions out is its own flags' (`--mode`, `--sort`, `--desc`, `--archived`, `--filter`): the daemon keeps no view, and each client keeps its own.
+Every command that reads or changes state takes `--json`, which prints the answer of the daemon op it runs, in the daemon's wire types (`internal/ipc`), and nothing else. A command that runs several ops prints one answer per line. `acmd events` follows the daemon as it changes: a snapshot, then each session, group, inbox item, job or setting added, updated or removed, one JSON event per line (`--types` to pick, `--since` to resume). Errors go to stderr as `{"error": {"code": "…", "message": "…"}}`. Commands take ids, never names or numbers in a list: `acmd list` shows each session's id, and `acmd find <name>` (or `acmd group find <name>`) prints the ids of those whose name has it. How `acmd list` lays sessions out is its own flags' (`--mode`, `--sort`, `--desc`): the daemon keeps no view, and each client keeps its own.
+
+`acmd list` filters too. Each filter is a flag, or `--filter key=value`, which is the same filter; `--filter` with no key is a text search. Different filters must all match, and one given twice matches either value:
+
+| Key | Flag | Values |
+|---|---|---|
+| `on` | `--on` | `local`, `remote` (any Remote host), or a host's name |
+| `resumable` | `--resumable` | what can be resumed: stopped sessions, here and on your hosts, and agents' sessions acmd never ran (no acmd id) |
+| `harness` | `--harness` | a harness's name, such as `Work` or `Terminal` |
+| `group` | `--group` | a group's id |
+| `status` | `--status` | a status, such as `busy` or `waiting` (comma-separated, or repeated) |
+| `archived` | `--archived` | `true`: include archived sessions |
+| `text` | `--filter <text>` | text in the name, description, folder or group (`g:<text>` for the group only) |
+
+```sh
+acmd list --on studio --resumable --harness Work
+acmd list --filter on=studio --filter resumable=true --filter harness=Work   # the same
+```
+
+`--on` filters the list here; `--host` (on every command) runs the whole command on that host instead. `acmd resume <id>` resumes a stopped session, or, by its agent session id as `acmd list --resumable` shows it, a session acmd never ran: here, or on the host it's on.
 
 **`acmd` on its own** opens a UI. That's the app when this machine has one and you're at it: the Mac app, or the Linux UI on a desktop. Otherwise it's the terminal UI: over SSH, on Windows, or on a machine with no screen. `acmd --app` and `acmd --terminal` choose. The terminal UI lists the sessions here, then each host's, grouped as in the app's sidebar, with what's waiting:
 
@@ -183,7 +203,7 @@ Install acmd first, any way above, so the checkout matches it. acmd looks for `a
 
 ### Uninstall acmd
 
-Run `acmd uninstall` first: it ends running sessions, stops the daemon, removes its service and the hooks, and asks whether to keep your sessions and settings (`--keep-data=false` deletes them). Then remove acmd the way you installed it: `brew uninstall acmd`, after removing the app if it's installed (Homebrew has no way for a formula to run `acmd uninstall` itself). With the install script, `--uninstall` does both steps: it runs `acmd uninstall --yes`, which keeps your sessions and settings, then removes acmd. After an uninstall, Claude conversations can still be resumed, and with your data kept, terminals come back as new shells in the same folders.
+Run `acmd uninstall` first: it ends running sessions, stops the daemon, removes its service and the hooks, and asks whether to keep your sessions and settings (`--keep-data=false` deletes them). Then remove acmd the way you installed it: `brew uninstall acmd`, after removing the app if it's installed (Homebrew has no way for a formula to run `acmd uninstall` itself). With the install script, `--uninstall` does both steps: it runs `acmd uninstall --yes`, which keeps your sessions and settings, then removes acmd. After an uninstall, Claude sessions can still be resumed, and with your data kept, terminals come back as new shells in the same folders.
 
 ### Windows
 

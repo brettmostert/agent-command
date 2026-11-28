@@ -84,7 +84,7 @@ func (r *requests) once(ctx context.Context, d *Daemon, id, name string, req ipc
 		f.err = err
 		return nil, err
 	}
-	if f.out, f.err = json.Marshal(onTheWire(out)); f.err != nil {
+	if f.out, f.err = json.Marshal(d.onTheWire(ctx, out)); f.err != nil {
 		return nil, f.err
 	}
 	now := d.cfg.Now()

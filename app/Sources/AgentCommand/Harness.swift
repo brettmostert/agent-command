@@ -248,63 +248,137 @@ struct HarnessChoice {
     }
 }
 
-/// A conversation to resume: its id, the agent it's from, and whether that agent
-/// says it's still live.
+/// A session to resume: an acmd session (sessionID), or an agent's own session
+/// acmd doesn't have (only agentID), on the machine it's on.
 nonisolated struct ResumeTarget: Equatable {
-    let id: String
-    let harness: Harness
+    /// acmd's id; "" for an agent's own session acmd doesn't have yet.
+    var sessionID = ""
+    /// The agent's session id (or an id typed in), resumed by it.
+    var agentID = ""
+    /// The Remote host it's on; "" for this Mac.
+    var host = ""
+    /// The harness it runs in, as its machine has it, and its kind.
+    var harnessID = ""
+    var harnessKind = "claude"
+    /// Its harness's name, for the warning about a live one.
+    var harnessName = "Claude"
+    /// The agent says it's still live, maybe in another terminal.
     var isRunning = false
+    /// A stopped acmd session: resumed as itself (the resume op). Anything
+    /// else is resumed by its agent id, which also brings an archived one back.
+    var byID = false
 }
 
-/// The resume picker's list: earlier conversations, narrowed by what's typed. An id
-/// typed with nothing listed for it gets a row for each agent, as an id alone
+/// The Resume window's list: sessions that can be resumed, here and on the
+/// hosts, narrowed by where (the sidebar's filter) and by what's typed. A
+/// search matches the name first, then the id, then the folder; within each,
+/// the most recently active first. An id typed with nothing listed for it gets
+/// a row for each agent, on each machine the filter takes in, as an id alone
 /// doesn't say whose it is.
 struct ResumeChoice {
     /// One row of the list.
     enum Row: Identifiable, Equatable {
-        case conversation(Conversation)
-        /// Look the typed id up as this agent's.
-        case typed(String, Harness)
+        case session(Session)
+        /// Look the typed id up as this agent's, on host ("" for this Mac).
+        case typed(String, Harness, host: String)
 
         var id: String {
             switch self {
-            case .conversation(let c): "\(c.harness.id):\(c.id)"
-            case .typed(let id, let harness): "typed:\(harness.id):\(id)"
+            case .session(let s): "\(s.hostName):\(s.id):\(s.claudeSessionID)"
+            case .typed(let id, let harness, let host): "typed:\(host):\(harness.id):\(id)"
             }
         }
 
-        var target: ResumeTarget {
+        @MainActor var target: ResumeTarget {
             switch self {
-            case .conversation(let c): ResumeTarget(id: c.id, harness: c.harness, isRunning: c.isRunning)
-            case .typed(let id, let harness): ResumeTarget(id: id, harness: harness)
+            case .session(let s):
+                ResumeTarget(sessionID: s.id, agentID: s.claudeSessionID, host: s.hostName, harnessID: s.harnessID,
+                             harnessKind: s.harnessKind, harnessName: s.harnessTitle, isRunning: s.agentLive == true,
+                             byID: !s.id.isEmpty && s.can(.resume))
+            case .typed(let id, let harness, let host):
+                // A host has its own harnesses: there, the kind picks its default one.
+                ResumeTarget(agentID: id, host: host, harnessID: host.isEmpty ? harness.harnessID : "",
+                             harnessKind: harness.kind, harnessName: harness.title)
             }
         }
     }
 
-    var conversations: [Conversation] = []
+    var sessions: [Session] = []
+    /// The known hosts' names. Hosts with sessions listed are offered too.
+    var hosts: [String] = []
+    /// Where to list from, as the sidebar's filter says it.
+    var filter: SidebarFilter = .all
     private(set) var search = ""
     private(set) var selected = 0
 
-    init(_ conversations: [Conversation] = []) {
-        self.conversations = conversations
+    init(_ sessions: [Session] = [], hosts: [String] = [], filter: SidebarFilter = .all) {
+        (self.sessions, self.hosts, self.filter) = (sessions, hosts, filter)
     }
 
-    var matches: [Conversation] { conversations.filter { $0.matches(search) } }
+    /// The hosts it can list from: the known ones, then any that have sessions listed.
+    var places: [String] {
+        var names = hosts
+        for s in sessions where s.isOnHost && !names.contains(s.hostName) { names.append(s.hostName) }
+        return names
+    }
+
+    /// The filter's choices: All, Local, Remote and each host, once there's a host.
+    var choices: [SidebarFilter] { places.isEmpty ? [] : SidebarFilter.choices(hosts: places) }
+
+    /// The filter as it applies now: a host that's gone lists everything.
+    var shownFilter: SidebarFilter { filter.effective(hosts: places) }
+
+    /// The next or previous choice of where, round the end.
+    mutating func moveFilter(_ delta: Int) {
+        let list = choices
+        guard !list.isEmpty else { return }
+        let at = list.firstIndex(of: shownFilter) ?? 0
+        filter = list[(at + delta + list.count) % list.count]
+        selected = 0
+    }
+
+    private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+
+    var matches: [Session] {
+        let shown = sessions.filter { shownFilter.includes($0) }
+        let q = query
+        guard !q.isEmpty else { return shown }
+        // A stable sort by rank keeps the daemon's order, most recent first, within each.
+        return shown.enumerated()
+            .compactMap { pair in pair.element.resumeRank(q).map { (rank: $0, at: pair.offset, session: pair.element) } }
+            .sorted { ($0.rank, $0.at) < ($1.rank, $1.at) }
+            .map(\.session)
+    }
 
     /// What search holds, if it could be an id with nothing listed for it.
     var typedID: String? {
-        let text = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let text = query
         let isHex = !text.isEmpty && text.allSatisfy { $0.isHexDigit || $0 == "-" }
         return matches.isEmpty && text.count >= 8 && isHex ? text : nil
     }
 
-    var rows: [Row] {
-        if let id = typedID { return Harness.agents.map { .typed(id, $0) } }
-        return matches.map { .conversation($0) }
+    /// Where a typed id is looked up: each machine the filter takes in.
+    var lookIn: [String] {
+        switch shownFilter {
+        case .all: [""] + places
+        case .local: [""]
+        case .remote: places
+        case .host(let name): [name]
+        }
+    }
+
+    @MainActor var rows: [Row] {
+        if let id = typedID {
+            return lookIn.flatMap { host -> [Row] in
+                let agents = host.isEmpty ? Harness.agents : [Harness(kind: "claude"), Harness(kind: "antigravity")]
+                return agents.map { .typed(id, $0, host: host) }
+            }
+        }
+        return matches.map { .session($0) }
     }
 
     /// What return picks.
-    var chosen: Row? {
+    @MainActor var chosen: Row? {
         let list = rows
         return list.indices.contains(selected) ? list[selected] : nil
     }
@@ -314,12 +388,12 @@ struct ResumeChoice {
         selected = 0
     }
 
-    mutating func move(_ delta: Int) {
+    @MainActor mutating func move(_ delta: Int) {
         let count = rows.count
         if count > 0 { selected = (selected + delta + count) % count }
     }
 
-    mutating func select(_ row: Row) {
+    @MainActor mutating func select(_ row: Row) {
         if let index = rows.firstIndex(of: row) { selected = index }
     }
 }

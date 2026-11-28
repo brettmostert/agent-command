@@ -52,6 +52,12 @@ func TestClientOnlyDaemon(t *testing.T) {
 	// What using a host needs.
 	var hosts []ipc.RemoteHost
 	must(t, c.Call(ipc.OpRemoteHosts, nil, &hosts))
+	// Its list has only the hosts' sessions: none here, and no error.
+	var page ipc.SessionPage
+	must(t, c.Call(ipc.OpSessionList, ipc.SessionListRequest{Filter: ipc.SessionFilter{Resumable: true}}, &page))
+	if len(page.Items) != 0 || len(page.Unreached) != 0 {
+		t.Errorf("client-only session.list = %+v, want nothing", page)
+	}
 	var id ipc.RemoteIdentity
 	must(t, c.Call(ipc.OpRemoteIdentity, nil, &id))
 	if id.Fingerprint == "" {

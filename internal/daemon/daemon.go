@@ -371,7 +371,7 @@ func (d *Daemon) serve(ctx context.Context, c net.Conn) {
 			r := resultOf("", err)
 			resp.Error, resp.Code = r.Error, r.Code
 		} else if data != nil {
-			b, merr := json.Marshal(onTheWire(data))
+			b, merr := json.Marshal(d.onTheWire(ctx, data))
 			if merr != nil {
 				resp = ipc.Response{Error: merr.Error()}
 			} else {
@@ -492,23 +492,15 @@ func (d *Daemon) run(ctx context.Context, req ipc.Request) (any, error) {
 			return nil, err
 		}
 		return d.newSession(ctx, n)
-	case ipc.OpConversations:
-		var p ipc.Page
+	case ipc.OpSessionList:
+		var r ipc.SessionListRequest
 		if len(req.Data) > 0 {
 			var err error
-			if p, err = decode[ipc.Page](req.Data); err != nil {
+			if r, err = decode[ipc.SessionListRequest](req.Data); err != nil {
 				return nil, err
 			}
 		}
-		all, err := d.conversations(ctx)
-		if err != nil {
-			return nil, err
-		}
-		items, next, err := ipc.PageOf(all, p)
-		if err != nil {
-			return nil, badRequest("%v", err)
-		}
-		return ipc.ConversationPage{Items: items, NextCursor: next}, nil
+		return d.sessionList(ctx, r)
 	case ipc.OpInbox:
 		r, err := decode[ipc.InboxRequest](req.Data)
 		if err != nil {
@@ -858,9 +850,24 @@ func Running(p paths.Paths) bool {
 	return false
 }
 
-// onTheWire is what an op answers as clients see it: a session or group as
-// its wire type (internal/ipc/wire.go), never internal/core's.
-func onTheWire(data any) any {
+// onTheWire is what an op answers as clients see it: a session with its
+// harness's name, as wireOf has it.
+func (d *Daemon) onTheWire(ctx context.Context, data any) any {
+	switch v := data.(type) {
+	case *core.Session:
+		d.nameHarnesses(ctx, v)
+	case core.Session:
+		d.nameHarnesses(ctx, &v)
+		data = v
+	case []*core.Session:
+		d.nameHarnesses(ctx, v...)
+	}
+	return wireOf(data)
+}
+
+// wireOf is data as clients see it: a session or group as its wire type
+// (internal/ipc/wire.go), never internal/core's.
+func wireOf(data any) any {
 	switch v := data.(type) {
 	case *core.Session:
 		return ipc.SessionOf(v)

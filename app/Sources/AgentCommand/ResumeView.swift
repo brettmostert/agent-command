@@ -1,45 +1,92 @@
 import SwiftUI
 
-/// Picks an earlier Claude or Antigravity conversation to continue, or takes its id.
+/// Picks a session to resume, here or on a Remote host, or takes an agent's
+/// session id. Where to list from is the sidebar's filter (All, Local, Remote,
+/// a host); Tab moves through it.
 struct ResumeView: View {
     let store: SessionStore
     let close: () -> Void
     let choose: (ResumeTarget) -> Void
 
-    @State private var choice = ResumeChoice()
+    @State private var choice = ResumeChoice(filter: ResumeView.savedFilter)
     @State private var loading = true
     @State private var problem: String?
+    @State private var unreached: [String] = []
 
     private var theme: AppTheme { .shared }
+
+    /// Where the window's filter is kept: its own, apart from the sidebar's.
+    static let filterKey = "resumeFilter"
+    static var savedFilter: SidebarFilter { SidebarFilter(rawValue: UserDefaults.standard.string(forKey: filterKey) ?? "") }
 
     var body: some View {
         let list = choice.rows
         PopupBox(
             title: "Resume a session",
-            placeholder: "Search, or paste a session id",
+            placeholder: "Search by name, id or folder, or paste a session id",
             search: Binding(get: { choice.search }, set: { choice.setSearch($0) }),
             close: close,
             onMove: { choice.move($0) },
             onSubmit: {
                 if let row = choice.chosen { choose(row.target) }
+            },
+            onKey: { combo in
+                guard !choice.choices.isEmpty else { return false }
+                if combo == KeyCombo("tab") { moveFilter(1); return true }
+                if combo == KeyCombo("shift+tab") { moveFilter(-1); return true }
+                return false
             }
         ) {
-            rows(list)
+            VStack(alignment: .leading, spacing: 0) {
+                if !choice.choices.isEmpty { whereLine }
+                rows(list)
+            }
         }
         .onAppear {
-            store.loadConversations { found, error in
-                choice.conversations = found
+            choice.hosts = store.remoteHosts.map(\.name)
+            store.loadResumable { found, missed, error in
+                choice.sessions = found
+                unreached = missed
                 problem = error
                 loading = false
             }
         }
     }
 
+    private func moveFilter(_ delta: Int) {
+        choice.moveFilter(delta)
+        UserDefaults.standard.set(choice.filter.rawValue, forKey: Self.filterKey)
+    }
+
+    /// All, Local, Remote and each host, as the sidebar offers them.
+    private var whereLine: some View {
+        HStack(spacing: 4) {
+            Text("Where").foregroundStyle(theme.dim)
+            ForEach(choice.choices) { place in
+                let isSelected = place == choice.shownFilter
+                Text(place.title)
+                    .fontWeight(isSelected ? .bold : .regular)
+                    .foregroundStyle(isSelected ? theme.bg : theme.fg)
+                    .padding(.horizontal, 6)
+                    .background(isSelected ? theme.yellow : Color.clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        choice.filter = place
+                        moveFilter(0)
+                    }
+            }
+            Spacer()
+            Text("tab").foregroundStyle(theme.dim)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 12)
+    }
+
     private func rows(_ list: [ResumeChoice.Row]) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if let message = message(list) {
+                    ForEach(messages(list), id: \.self) { message in
                         Text(message)
                             .foregroundStyle(problem == nil ? theme.dim : theme.red)
                             .padding(.horizontal, 24)
@@ -48,10 +95,10 @@ struct ResumeView: View {
                         let isSelected = row == choice.chosen
                         Group {
                             switch row {
-                            case .conversation(let conversation):
-                                ConversationRow(conversation: conversation, isSelected: isSelected)
-                            case .typed(_, let harness):
-                                TypedIDRow(harness: harness, isSelected: isSelected)
+                            case .session(let session):
+                                ResumeRow(session: session, isSelected: isSelected)
+                            case .typed(_, let harness, let host):
+                                TypedIDRow(harness: harness, host: host, isSelected: isSelected)
                             }
                         }
                         .id(row.id)
@@ -68,11 +115,16 @@ struct ResumeView: View {
         }
     }
 
-    private func message(_ list: [ResumeChoice.Row]) -> String? {
-        if let problem { return problem }
-        if loading { return "Loading…" }
-        if choice.typedID != nil { return "Whose session is this id? Press return to look it up" }
-        return list.isEmpty ? "No matching sessions" : nil
+    private func messages(_ list: [ResumeChoice.Row]) -> [String] {
+        if let problem { return [problem] }
+        if loading { return ["Loading…"] }
+        var out = unreached.filter { choice.lookIn.contains($0) }.map { "\($0) didn't answer: its sessions aren't listed" }
+        if choice.typedID != nil {
+            out.append("Whose session is this id? Press return to look it up")
+        } else if list.isEmpty {
+            out.append("No matching sessions")
+        }
+        return out
     }
 }
 
@@ -92,9 +144,10 @@ private struct HarnessMark: View {
     }
 }
 
-/// Looks the typed id up as one agent's.
+/// Looks the typed id up as one agent's, on this Mac or a host.
 private struct TypedIDRow: View {
     let harness: Harness
+    let host: String
     let isSelected: Bool
     private var theme: AppTheme { .shared }
 
@@ -105,6 +158,9 @@ private struct TypedIDRow: View {
                 .fontWeight(isSelected ? .bold : .regular)
                 .foregroundStyle(isSelected ? theme.bg : theme.fg)
             Spacer(minLength: 12)
+            if !host.isEmpty {
+                Text("↗ \(host)").foregroundStyle(isSelected ? theme.bg : theme.cyan)
+            }
         }
         .padding(.horizontal, 8)
         .frame(height: 19)
@@ -113,8 +169,10 @@ private struct TypedIDRow: View {
     }
 }
 
-private struct ConversationRow: View {
-    let conversation: Conversation
+/// A session that can be resumed: its name, where it is and how it stands, and
+/// under it its folder, branch and harness.
+private struct ResumeRow: View {
+    let session: Session
     let isSelected: Bool
 
     private var theme: AppTheme { .shared }
@@ -122,30 +180,37 @@ private struct ConversationRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                HarnessMark(harness: conversation.harness, isSelected: isSelected)
-                    .help(conversation.harness.title)
-                Text(conversation.displayTitle)
+                HarnessMark(harness: session.harness, isSelected: isSelected)
+                    .help(session.harnessTitle)
+                Text(session.displayName.isEmpty ? "Untitled" : session.displayName)
                     .fontWeight(isSelected ? .bold : .regular)
                     .foregroundStyle(isSelected ? theme.bg : theme.fg)
                     .lineLimit(1)
                 Spacer(minLength: 12)
-                if conversation.isRunning {
-                    Text("running").foregroundStyle(isSelected ? theme.bg : theme.yellow)
-                } else if conversation.session_id != nil {
-                    Text("in sidebar").foregroundStyle(isSelected ? theme.bg : theme.dim)
+                if session.isOnHost {
+                    Text("↗ \(session.hostName)").foregroundStyle(isSelected ? theme.bg : theme.cyan).lineLimit(1)
                 }
-                if let updated = conversation.updated {
+                if session.agentLive == true {
+                    Text("running").foregroundStyle(isSelected ? theme.bg : theme.yellow)
+                } else if !session.id.isEmpty {
+                    Text(session.status).foregroundStyle(isSelected ? theme.bg : theme.dim)
+                }
+                if let updated = session.lastActive {
                     Text(updated, format: .relative(presentation: .named))
                         .foregroundStyle(isSelected ? theme.bg : theme.dim)
                         .lineLimit(1)
                 }
             }
-            Text(detail)
-                .foregroundStyle(isSelected ? theme.bg : theme.dim)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                // Under the title, past the mark.
-                .padding(.leading, 21)
+            HStack(spacing: 8) {
+                Text(detail)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 12)
+                Text(session.harnessTitle).lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? theme.bg : theme.dim)
+            // Under the name, past the mark.
+            .padding(.leading, 21)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
@@ -153,8 +218,10 @@ private struct ConversationRow: View {
         .padding(.horizontal, 16)
     }
 
+    /// A host's folder is as it gave it: this Mac's home means nothing there.
     private var detail: String {
-        let folder = (conversation.cwd as NSString).abbreviatingWithTildeInPath
-        return conversation.branch.map { "\(folder) · \($0)" } ?? folder
+        let folder = session.isOnHost ? session.cwd : (session.cwd as NSString).abbreviatingWithTildeInPath
+        guard let branch = session.branch, !branch.isEmpty else { return folder }
+        return "\(folder) · \(branch)"
     }
 }

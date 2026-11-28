@@ -795,7 +795,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
-    /// A popup to pick an earlier Claude or Antigravity conversation, or enter its id.
+    /// A popup to pick a session to resume, here or on a Remote host, or enter its id.
     @objc private func resumeSession() {
         closePopup()
         showPopup(ResumeView(
@@ -813,14 +813,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let alert = NSAlert()
             alert.messageText = "This session looks like it's still running"
             alert.informativeText = """
-                \(target.harness.title) reports it as live, possibly in another terminal. Resuming puts a \
-                second process on the same conversation. Exit the other one first if you can.
+                \(target.harnessName) reports it as live, possibly in another terminal. Resuming puts a \
+                second process on the same session. Exit the other one first if you can.
                 """
             alert.addButton(withTitle: "Cancel")
             alert.addButton(withTitle: "Resume Anyway")
             guard alert.runModal() == .alertSecondButtonReturn else { return }
         }
-        store.resumeConversation(target.id, harness: target.harness)
+        store.resume(target)
     }
 
     /// Shows or hides the command popup.

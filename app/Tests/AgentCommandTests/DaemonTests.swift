@@ -58,28 +58,26 @@ private func iso(_ secondsAgo: TimeInterval) -> String {
     #expect(!shown.isWithdrawal && shown.isFor("me") && !shown.isFor("third") && shown.title == "T")
 }
 
-@Test func aConversationCanBeFound() throws {
-    let c = try decode(Conversation.self, [
-        "id": "ABC123", "cwd": "/work/Parser", "title": "Fix the Lexer", "branch": "main",
-        "updated_at": "2026-11-07T10:00:00Z", "running": true,
+@Test func aResumableSessionRanksBySearch() throws {
+    let s = try decode(Session.self, [
+        "id": "", "claude_session_id": "ABC123-x", "name": "Fix the Lexer", "cwd": "/work/Parser", "branch": "main",
+        "harness_kind": "claude", "harness_name": "Day Job", "last_event_at": "2026-11-07T10:00:00Z", "agent_live": true,
     ])
-    #expect(c.displayTitle == "Fix the Lexer" && c.isRunning && c.updated != nil)
-    for found in ["", "  ", "lexer", "PARSER", "main", "abc"] { #expect(c.matches(found), "\(found)") }
-    #expect(!c.matches("nothing like it"))
-    let bare = try decode(Conversation.self, ["id": "x", "cwd": "/", "updated_at": "2026-11-07T10:00:00.5Z"])
-    #expect(bare.displayTitle == "Untitled" && !bare.isRunning && bare.updated != nil)
-    #expect(try decode(Conversation.self, ["id": "x", "cwd": "/", "updated_at": "nope"]).updated == nil)
+    #expect(s.agentLive == true && s.branch == "main" && s.lastActive != nil && s.harnessTitle == "Day Job")
+    #expect(s.resumeRank("lexer") == 0 && s.resumeRank("abc123") == 1 && s.resumeRank("parser") == 2)
+    #expect(s.resumeRank("main") == nil && s.resumeRank("day job") == nil, "not its branch, nor its harness")
+    let bare = try decode(Session.self, ["id": "x", "cwd": "/", "last_event_at": "2026-11-07T10:00:00.5Z"])
+    #expect(bare.agentLive == nil && bare.lastActive != nil && bare.resumeRank("x") == 1)
+    #expect(try decode(Session.self, ["id": "x", "last_event_at": "nope"]).lastActive == nil)
 }
 
-@Test func aConversationSaysWhoseItIs() throws {
-    let older = try decode(Conversation.self, ["id": "x", "cwd": "/", "updated_at": "2026-11-07T10:00:00Z"])
-    #expect(older.harness_id == nil && older.harness == .claude, "none: Claude's")
-    let claude = try decode(Conversation.self, ["id": "x", "harness_kind": "claude", "cwd": "/", "updated_at": "2026-11-07T10:00:00Z"])
-    #expect(claude.harness == .claude)
-    let gravity = try decode(Conversation.self, ["id": "y", "harness_kind": "antigravity", "cwd": "/w", "updated_at": "2026-11-07T10:00:00Z"])
-    #expect(gravity.harness == .antigravity)
-    #expect(gravity.matches("antigrav") && !older.matches("antigrav"), "the agent's name finds it")
+@Test func aSessionHasItsHarnessNameFromTheDaemon() throws {
+    let host = try decode(Session.self, ["id": "r1", "host": "studio", "harness_kind": "claude", "harness_id": "theirs", "harness_name": "Day Job"])
+    #expect(host.harnessTitle == "Day Job", "a host's harness has the host's name")
+    let none = try decode(Session.self, ["id": "s", "harness_kind": "antigravity"])
+    #expect(none.harnessTitle == "Antigravity", "without one, its kind's")
 }
+
 
 
 

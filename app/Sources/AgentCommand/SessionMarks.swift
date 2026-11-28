@@ -131,6 +131,7 @@ struct PaneHeader: View {
                     SessionMark(session: session)
                     Text(session.displayName).fontWeight(.bold).foregroundStyle(theme.fg).lineLimit(1)
                     Text(session.statusLine).foregroundStyle(theme.dim).lineLimit(1).layoutPriority(1)
+                    Text(session.harnessTitle).foregroundStyle(theme.dim).lineLimit(1).layoutPriority(1)
                     if let description = session.description, !description.isEmpty {
                         Text(description).foregroundStyle(theme.dim).lineLimit(1).truncationMode(.tail)
                     }

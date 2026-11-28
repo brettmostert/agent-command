@@ -182,10 +182,11 @@ func inboxOf(t *testing.T, c *ipc.Conn, r ipc.InboxRequest) []core.InboxItem {
 	return page.Items
 }
 
-func conversationsOf(t *testing.T, c *ipc.Conn) []ipc.Conversation {
+// resumableOf is what session.list says can be resumed.
+func resumableOf(t *testing.T, c *ipc.Conn) []*ipc.Session {
 	t.Helper()
-	var page ipc.ConversationPage
-	must(t, c.Call(ipc.OpConversations, nil, &page))
+	var page ipc.SessionPage
+	must(t, c.Call(ipc.OpSessionList, ipc.SessionListRequest{Filter: ipc.SessionFilter{Resumable: true, Archived: true}}, &page))
 	return page.Items
 }
 

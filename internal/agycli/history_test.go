@@ -116,7 +116,7 @@ func TestFindConversation(t *testing.T) {
 	}
 	two := history + `{"display":"x","timestamp":1,"workspace":"/w","conversationId":"ee7b48a5-0000-4000-8000-000000000000"}` + "\n"
 	must(t, os.WriteFile(filepath.Join(dir, "history.jsonl"), []byte(two), 0o600))
-	if _, err := FindConversation(dir, "ee7b48a5"); err == nil || !strings.Contains(err.Error(), "2 Antigravity conversations") {
+	if _, err := FindConversation(dir, "ee7b48a5"); err == nil || !strings.Contains(err.Error(), "2 Antigravity sessions") {
 		t.Errorf("ambiguous: %v", err)
 	}
 	if Dir("/h") != "/h/.gemini/antigravity-cli" {

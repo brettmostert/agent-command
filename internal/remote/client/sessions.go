@@ -44,7 +44,7 @@ func (c *Client) Browse(ctx context.Context, host string) (ipc.RemoteBrowse, err
 // follows.
 func (c *Client) NewSession(ctx context.Context, r ipc.RemoteNewRequest) (*ipc.Session, error) {
 	req := ipc.NewRequest{Cwd: r.Dir, HarnessID: r.HarnessID, HarnessKind: r.HarnessKind, Name: r.Name, Prompt: r.Prompt, Args: r.Args, GroupID: r.GroupID,
-		SetWith: r.SetWith}
+		SetWith: r.SetWith, Resume: r.Resume}
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, err

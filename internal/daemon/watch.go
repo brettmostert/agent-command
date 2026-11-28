@@ -74,7 +74,7 @@ func (d *Daemon) newSession(ctx context.Context, req ipc.NewRequest) (*core.Sess
 	}
 	switch {
 	case req.Resume != "":
-		s, err = d.resumeConversation(ctx, req)
+		s, err = d.resumeAgentSession(ctx, req)
 	case req.Cwd == "":
 		return nil, badRequest("no folder for the new session")
 	default:

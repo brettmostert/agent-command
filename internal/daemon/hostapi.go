@@ -89,7 +89,7 @@ func (b hostBackend) Call(ctx context.Context, op string, data json.RawMessage) 
 	if out == nil {
 		return nil, nil
 	}
-	return json.Marshal(onTheWire(out))
+	return json.Marshal(b.d.onTheWire(ctx, out))
 }
 
 // Subscribe is the daemon's event stream for a paired device.

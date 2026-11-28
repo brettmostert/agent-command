@@ -315,7 +315,11 @@ func writeConversation(t *testing.T, dir, id, cwd, title string) {
 		`{"cwd":"`+cwd+`"}`+"\n"+`{"aiTitle":"`+title+`"}`+"\n"), 0o600))
 }
 
-func TestResumeConversation(t *testing.T) {
+// session.list with resumable lists the agents' own sessions, with no acmd
+// id, newest first, a page at a time. Resuming one makes an acmd session;
+// once it runs it isn't resumable, and resuming it again (or after it's
+// archived) is that session, not a second one.
+func TestResumeAgentSession(t *testing.T) {
 	sessionsHere(t)
 	const (
 		idle = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -331,34 +335,37 @@ func TestResumeConversation(t *testing.T) {
 	})
 	c := dial(t, p)
 
-	list := conversationsOf(t, c)
+	list := resumableOf(t, c)
 	if len(list) != 2 {
-		t.Fatalf("conversations: %+v", list)
+		t.Fatalf("resumable: %+v", list)
 	}
 	// A page at a time.
-	var page ipc.ConversationPage
-	must(t, c.Call(ipc.OpConversations, ipc.Page{Limit: 1}, &page))
-	if len(page.Items) != 1 || page.Items[0].ID != list[0].ID || page.NextCursor == "" {
+	resumable := ipc.SessionFilter{Resumable: true}
+	var page ipc.SessionPage
+	must(t, c.Call(ipc.OpSessionList, ipc.SessionListRequest{Filter: resumable, Page: ipc.Page{Limit: 1}}, &page))
+	if len(page.Items) != 1 || page.Items[0].ClaudeSessionID != list[0].ClaudeSessionID || page.NextCursor == "" {
 		t.Fatalf("first page = %+v", page)
 	}
-	must(t, c.Call(ipc.OpConversations, ipc.Page{Limit: 1, Cursor: page.NextCursor}, &page))
-	if len(page.Items) != 1 || page.Items[0].ID != list[1].ID || page.NextCursor != "" {
+	must(t, c.Call(ipc.OpSessionList, ipc.SessionListRequest{Filter: resumable, Page: ipc.Page{Limit: 1, Cursor: page.NextCursor}}, &page))
+	if len(page.Items) != 1 || page.Items[0].ClaudeSessionID != list[1].ClaudeSessionID || page.NextCursor != "" {
 		t.Errorf("last page = %+v", page)
 	}
-	if err := c.Call(ipc.OpConversations, ipc.Page{Cursor: ipc.BeforeCursor(3)}, nil); codeOf(err) != errcode.BadRequest {
+	if err := c.Call(ipc.OpSessionList, ipc.SessionListRequest{Page: ipc.Page{Cursor: ipc.BeforeCursor(3)}}, nil); codeOf(err) != errcode.BadRequest {
 		t.Errorf("another list's cursor: %v", err)
 	}
-	byID := map[string]ipc.Conversation{}
+	byID := map[string]*ipc.Session{}
 	for _, item := range list {
-		byID[item.ID] = item
+		byID[item.ClaudeSessionID] = item
 	}
-	if !byID[live].Running || byID[idle].Running || byID[idle].Title != "idle work" {
-		t.Errorf("conversations: %+v", list)
+	if !byID[live].AgentLive || byID[idle].AgentLive || byID[idle].Name != "idle work" || byID[idle].ID != "" ||
+		byID[idle].Cwd != "/w/idle" || byID[idle].HarnessName != "Claude" {
+		t.Errorf("resumable: %+v", list)
 	}
 
-	// By id prefix: its folder and title come from the conversation.
+	// By id prefix: its folder and name come from the agent's record.
 	s := newSess(t, c, ipc.NewRequest{Resume: "11111111"})
-	if s.ClaudeSessionID != idle || s.Cwd != "/w/idle" || s.Name != "idle work" || s.Kind != core.KindHosted || s.Core().IsTerminal() {
+	if s.ClaudeSessionID != idle || s.Cwd != "/w/idle" || s.Name != "idle work" || s.Kind != core.KindHosted || s.Core().IsTerminal() ||
+		s.HarnessName != "Claude" {
 		t.Fatalf("resumed: %+v", s)
 	}
 	r := fh.requests()
@@ -366,11 +373,11 @@ func TestResumeConversation(t *testing.T) {
 		t.Fatalf("host request: %+v", r)
 	}
 
-	// It's listed as already tracked, and resuming it again isn't a second session.
-	list = conversationsOf(t, c)
-	for _, item := range list {
-		if item.ID == idle && item.SessionID != s.ID {
-			t.Errorf("tracked: %+v", item)
+	// It runs now, so it isn't resumable, and resuming it again isn't a
+	// second session.
+	for _, item := range resumableOf(t, c) {
+		if item.ClaudeSessionID == idle {
+			t.Errorf("a running session is resumable: %+v", item)
 		}
 	}
 	again := newSess(t, c, ipc.NewRequest{Resume: idle})
@@ -378,21 +385,38 @@ func TestResumeConversation(t *testing.T) {
 		t.Errorf("resumed twice: %+v, %d hosts", again, len(fh.requests()))
 	}
 
-	// An archived one comes back rather than being duplicated.
+	// Archived, it's resumable as itself, with its acmd id, and comes back
+	// rather than being duplicated.
 	must(t, c.Call(ipc.OpMutate, ipc.Mutation{Kind: ipc.MutArchive, Targets: ipc.Here(s.ID)}, nil))
+	found := false
+	for _, item := range resumableOf(t, c) {
+		if item.ClaudeSessionID == idle {
+			found = item.ID == s.ID && item.Status == core.StatusArchived
+		}
+	}
+	if !found {
+		t.Errorf("the archived session isn't resumable as itself: %+v", resumableOf(t, c))
+	}
+	var hidden ipc.SessionPage
+	must(t, c.Call(ipc.OpSessionList, ipc.SessionListRequest{Filter: resumable}, &hidden))
+	for _, item := range hidden.Items {
+		if item.ID == s.ID {
+			t.Errorf("archived without archived: %+v", item)
+		}
+	}
 	back := newSess(t, c, ipc.NewRequest{Resume: idle})
 	if back.ID != s.ID || back.Status == core.StatusArchived {
 		t.Errorf("after archive: %+v", back)
 	}
 
 	if err := c.Call(ipc.OpNew, ipc.NewRequest{Resume: "99999999"}, nil); err == nil {
-		t.Error("an unknown conversation was resumed")
+		t.Error("an unknown agent session was resumed")
 	}
 }
 
-// agy's conversations are listed with Claude's, newest first, and resumed with
+// agy's sessions are listed with Claude's, newest first, and resumed with
 // agy in their folder.
-func TestResumeAntigravityConversation(t *testing.T) {
+func TestResumeAntigravitySession(t *testing.T) {
 	sessionsHere(t)
 	const (
 		claudeID = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -410,11 +434,11 @@ func TestResumeAntigravityConversation(t *testing.T) {
 	start(t, p, func(c *Config) { c.Hosts, c.ClaudeDir, c.AgyDir = fh, claude, agy })
 	c := dial(t, p)
 
-	list := conversationsOf(t, c)
-	if len(list) != 3 || list[0].ID != newer || list[0].HarnessKind != core.HarnessAntigravity || list[0].Cwd != "/w/agy" ||
-		list[0].Title != "Delete notes2.txt" || list[1].ID != claudeID || list[1].HarnessKind != core.HarnessClaude ||
-		list[2].ID != older || list[2].HarnessKind != core.HarnessAntigravity {
-		t.Fatalf("conversations: %+v", list)
+	list := resumableOf(t, c)
+	if len(list) != 3 || list[0].ClaudeSessionID != newer || list[0].HarnessKind != core.HarnessAntigravity || list[0].Cwd != "/w/agy" ||
+		list[0].Name != "Delete notes2.txt" || list[0].HarnessName != "Antigravity" || list[1].ClaudeSessionID != claudeID ||
+		list[1].HarnessKind != core.HarnessClaude || list[2].ClaudeSessionID != older || list[2].HarnessKind != core.HarnessAntigravity {
+		t.Fatalf("resumable: %+v", list)
 	}
 
 	s := newSess(t, c, ipc.NewRequest{HarnessKind: core.HarnessAntigravity, Resume: "84B306A4"})
@@ -425,24 +449,20 @@ func TestResumeAntigravityConversation(t *testing.T) {
 	if len(r) != 1 || r[0].Kind != core.HarnessAntigravity || r[0].Resume != newer || r[0].ClaudeSession != "" || r[0].Dir != "/w/agy" {
 		t.Fatalf("host request: %+v", r)
 	}
-	list = conversationsOf(t, c)
-	if list[0].SessionID != s.ID {
-		t.Errorf("tracked: %+v", list[0])
-	}
 	if again := newSess(t, c, ipc.NewRequest{HarnessKind: core.HarnessAntigravity, Resume: newer}); again.ID != s.ID || len(fh.requests()) != 1 {
 		t.Errorf("resumed twice: %+v", again)
 	}
 
 	// Each agent's ids are looked up in its own history.
 	if err := c.Call(ipc.OpNew, ipc.NewRequest{Resume: newer}, nil); err == nil {
-		t.Error("resumed agy's conversation as Claude's")
+		t.Error("resumed agy's session as Claude's")
 	}
 	if err := c.Call(ipc.OpNew, ipc.NewRequest{HarnessKind: core.HarnessAntigravity, Resume: claudeID}, nil); err == nil ||
-		!strings.Contains(err.Error(), "no Antigravity conversation") {
+		!strings.Contains(err.Error(), "no Antigravity session") {
 		t.Errorf("Claude's id as agy's: %v", err)
 	}
 	if err := c.Call(ipc.OpNew, ipc.NewRequest{HarnessKind: core.HarnessTerminal, Resume: claudeID}, nil); err == nil {
-		t.Error("resumed a terminal conversation")
+		t.Error("resumed a terminal's agent session")
 	}
 }
 

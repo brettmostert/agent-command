@@ -23,7 +23,7 @@ const (
 const minIDPrefix = 8
 
 // ErrNoConversation means no conversation has that id.
-var ErrNoConversation = errors.New("no Claude conversation has that id")
+var ErrNoConversation = errors.New("no Claude session has that id")
 
 // Conversation is an earlier Claude session, read from its transcript. The
 // transcript format is Claude's own, so anything unexpected is skipped.
@@ -88,7 +88,7 @@ func FindConversation(configDir, id string) (Conversation, error) {
 	case 1:
 		return found[0], nil
 	}
-	return Conversation{}, fmt.Errorf("%d Claude conversations start with %s: use more of the id", len(found), id)
+	return Conversation{}, fmt.Errorf("%d Claude sessions start with %s: use more of the id", len(found), id)
 }
 
 type transcript struct {

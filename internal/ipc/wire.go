@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"cmp"
 	"time"
 
 	"github.com/brettmostert/agent-command/internal/core"
@@ -38,6 +39,9 @@ type Session struct {
 	Kind        core.Kind `json:"kind"`
 	HarnessKind string    `json:"harness_kind"`
 	HarnessID   string    `json:"harness_id,omitempty"`
+	// HarnessName is its harness's name, as its own machine has it ("Work"),
+	// or its kind's title ("Claude", "Terminal") when that harness is gone.
+	HarnessName string    `json:"harness_name"`
 	Pid         int       `json:"pid,omitempty"`
 	Remote      bool      `json:"remote,omitempty"`
 	Host        string    `json:"host,omitempty"`
@@ -54,6 +58,11 @@ type Session struct {
 	Agent        string   `json:"agent,omitempty"`
 	DisplayName  string   `json:"display_name,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Only in session.list with resumable: the git branch its agent last
+	// recorded, and whether the agent reports it live, maybe in another
+	// terminal (resuming it puts a second process on it).
+	Branch    string `json:"branch,omitempty"`
+	AgentLive bool   `json:"agent_live,omitempty"`
 }
 
 // Attention is why a session needs you, and how urgently: Rank 1 is the most
@@ -97,7 +106,8 @@ func SessionOf(s *core.Session) *Session {
 		Kind: s.Kind, HarnessKind: s.HarnessKind, HarnessID: s.HarnessID, Pid: s.Pid, Remote: s.Remote, Host: s.Host,
 		RemoteID: s.RemoteID, HostGone: s.HostGone, JobID: s.JobID,
 		CreatedAt: s.CreatedAt, LastEventAt: s.LastEventAt, StatusSince: s.StatusSince, ArchivedAt: s.ArchivedAt,
-		Agent: s.Agent(), DisplayName: s.DisplayName(), Capabilities: s.Capabilities(),
+		HarnessName: cmp.Or(s.HarnessName, core.KindTitle(s.HarnessKind)),
+		Agent:       s.Agent(), DisplayName: s.DisplayName(), Capabilities: s.Capabilities(),
 	}
 	if s.SetID != "" {
 		w.Parent, w.Order = s.SetID, s.SetOrder
@@ -118,8 +128,8 @@ func (w *Session) Core() *core.Session {
 		ID: w.ID, Name: w.Name, Description: w.Description, GroupID: w.GroupID, NameSource: w.NameSource,
 		Cwd: w.Cwd, ClaudeSessionID: w.ClaudeSessionID, ClaudeHistory: w.ClaudeHistory,
 		TranscriptPath: w.TranscriptPath, Status: w.Status, StatusDetail: w.StatusDetail, Unseen: w.Unseen,
-		Kind: w.Kind, HarnessKind: w.HarnessKind, HarnessID: w.HarnessID, Pid: w.Pid, Remote: w.Remote, Host: w.Host,
-		RemoteID: w.RemoteID, HostGone: w.HostGone, JobID: w.JobID,
+		Kind: w.Kind, HarnessKind: w.HarnessKind, HarnessID: w.HarnessID, HarnessName: w.HarnessName, Pid: w.Pid,
+		Remote: w.Remote, Host: w.Host, RemoteID: w.RemoteID, HostGone: w.HostGone, JobID: w.JobID,
 		CreatedAt: w.CreatedAt, LastEventAt: w.LastEventAt, StatusSince: w.StatusSince, ArchivedAt: w.ArchivedAt,
 	}
 	if w.Order > 0 {
